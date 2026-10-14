@@ -2,9 +2,10 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import requests
+import os
 from datetime import datetime
 
-# 페이지 기본 설정 (파비콘 및 타이틀)
+# 페이지 기본 설정
 st.set_page_config(
     page_title="FLICKRFOX 발주 시스템",
     page_icon="https://ecimg.cafe24img.com/pg429b97198991081/nontidy/web/upload/favicon-c5fdfdd80324a6bed8d56b18fbd7ef0b.ico",
