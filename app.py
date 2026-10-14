@@ -224,12 +224,13 @@ def calculate_reorder_table(products, po_history, holiday_buffer, target_days):
             need_order = True
             rec_qty = moq
 
+# ✅ 개선된 코드 구간 (여기로 교체)
         if stock <= 0:
             priority = "🚨 1순위: 현재품절"
         elif need_order and days_left <= effective_lead_time:
-            priority = "🔥 2순위: 긴급발주"
+            priority = "🔥 2순위: 긴급발주 (입고 전 소진 위험)"
         elif need_order:
-            priority = "⚠️ 3순위: 발주권장"
+            priority = "⚠️ 3순위: 발주권장 (여유 있음)"
         else:
             priority = "✅ 정상 (여유)"
 
