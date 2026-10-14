@@ -1,23 +1,16 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import datetime
-import json
-import os
 import requests
-import io
+from datetime import datetime
 
-# ==========================================
-# 0. 플리커폭스(FLICKRFOX) 다크 텍 테마 설정
-# ==========================================
+# 페이지 기본 설정 (파비콘 및 타이틀)
 st.set_page_config(
     page_title="FLICKRFOX 발주 시스템",
     page_icon="https://ecimg.cafe24img.com/pg429b97198991081/nontidy/web/upload/favicon-c5fdfdd80324a6bed8d56b18fbd7ef0b.ico",
     layout="wide",
     initial_sidebar_state="expanded"
 )
-)
-
 # 브랜드 가이드 v5 기반 완전 커스텀 CSS
 st.markdown("""
 <style>
