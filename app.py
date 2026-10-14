@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import requests
 import os
+import json
 from datetime import datetime
 
 # 페이지 기본 설정
