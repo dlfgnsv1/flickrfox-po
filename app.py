@@ -24,7 +24,7 @@ SLACK_WEBHOOK_URL = "https://hooks.slack.com/services/T0AR4PPUVN1/B0C9739BZ18/77
 
 # 관리자 비밀번호 설정 (Streamlit Cloud 배포 시 secrets 우선 적용, 로컬은 기본값 사용)
 try:
-    ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "flickrfox")
+    ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "fox1989@@")
 except Exception:
     ADMIN_PASSWORD = "fox1989@@"  # <-- 원하시는 관리자 비밀번호로 변경 가능합니다.
 
