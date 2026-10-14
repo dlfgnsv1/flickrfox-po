@@ -219,7 +219,7 @@ def calculate_reorder_table(products, po_history, holiday_buffer, target_days):
 
 
 def build_calendar_events(products, po_history):
-    """캘린더 탭에 표시할 날짜별 이벤트, 품절 목록, 품절 임박 목록, 입고 예정 목록 생성"""
+    """캘린더 탭에 표시할 날짜별 이벤트(다크모드 컬러 적용), 품절 목록, 입고전품절 목록 생성"""
     today = date.today()
     today_str = today.strftime("%Y-%m-%d")
     events_by_date = {}
@@ -247,14 +247,16 @@ def build_calendar_events(products, po_history):
 
         if arr_str:
             is_delayed = arr_str < today_str
+            # 다크모드 배지 컬러: 입고예정(딥블루), 입고지연(딥퍼플)
             events_by_date.setdefault(arr_str, []).append({
                 "type": "입고예정",
                 "icon": "🚨지연" if is_delayed else "📦",
                 "name": name,
                 "qty": qty,
                 "detail": f"입고예정 {qty:,}개 ({supplier})" + (" [입고지연 확인요망]" if is_delayed else ""),
-                "color": "#6A1B9A" if is_delayed else "#1E88E5",
-                "bg": "#F3E5F5" if is_delayed else "#E3F2FD"
+                "color": "#C084FC" if is_delayed else "#60A5FA",
+                "bg": "#2E1B40" if is_delayed else "#172A45",
+                "border": "#A855F7" if is_delayed else "#3B82F6"
             })
 
             item_row = {
@@ -303,25 +305,27 @@ def build_calendar_events(products, po_history):
             stockout_str = stockout_date.strftime("%Y-%m-%d")
 
             if days_left <= 60:
-                # 입고예정일이 없거나 품절예상일이 입고예정일보다 빠르면 '단절위험'
-                is_gap_risk = (not next_po) or (stockout_str < next_po["date"])
-                ev_type = "단절위험" if is_gap_risk else "품절예정"
+                # 입고예정일이 없거나 품절예상일이 입고예정일보다 빠르면 '입고전품절'
+                is_before_arrival = (not next_po) or (stockout_str < next_po["date"])
+                ev_type = "입고전품절" if is_before_arrival else "품절예정"
 
+                # 다크모드 배지 컬러: 입고전품절(딥레드), 품절예정(딥앰버)
                 events_by_date.setdefault(stockout_str, []).append({
                     "type": ev_type,
-                    "icon": "🔥" if is_gap_risk else "⚠️",
+                    "icon": "🔥" if is_before_arrival else "⚠️",
                     "name": name,
                     "qty": stock,
-                    "detail": f"품절예상 (현재고 {stock:,}개 / 일판매 {daily_sales}개)",
-                    "color": "#D32F2F" if is_gap_risk else "#EF6C00",
-                    "bg": "#FFEBEE" if is_gap_risk else "#FFF3E0"
+                    "detail": f"{ev_type} (현재고 {stock:,}개 / 일판매 {daily_sales}개)",
+                    "color": "#F87171" if is_before_arrival else "#FBBF24",
+                    "bg": "#3B181E" if is_before_arrival else "#332414",
+                    "border": "#EF4444" if is_before_arrival else "#F59E0B"
                 })
 
-                if days_left <= 14 or is_gap_risk:
+                if days_left <= 14 or is_before_arrival:
                     stockout_soon_list.append({
                         "품절예상일": stockout_str,
                         "D-Day": f"D-{days_left}",
-                        "위험구분": "🔥 입고 전 품절(단절위험)" if is_gap_risk else "⚠️ 품절 임박",
+                        "상태구분": "🔥 입고전품절 (재고공백 주의)" if is_before_arrival else "⚠️ 품절 임박 (입고대기중)",
                         "품목명": name,
                         "바코드": bc,
                         "현재고": stock,
@@ -333,43 +337,104 @@ def build_calendar_events(products, po_history):
 
 
 def render_monthly_calendar_html(year, month, events_by_date, filter_types):
-    """월간 달력 그리드 HTML 렌더링"""
+    """눈이 편안한 다크모드(Dark Slate) 월간 달력 그리드 HTML 렌더링"""
     cal = calendar.Calendar(firstweekday=6)  # 일요일 시작
     month_days = cal.monthdatescalendar(year, month)
     today_str = date.today().strftime("%Y-%m-%d")
 
     html = """
     <style>
-        .cal-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-family: 'Pretendard', sans-serif; }
-        .cal-th { background-color: #1E1E2E; color: #FFFFFF; padding: 10px; text-align: center; font-size: 13px; font-weight: 600; border: 1px solid #333; }
-        .cal-td { height: 125px; vertical-align: top; padding: 6px; border: 1px solid #E0E0E0; background-color: #FFFFFF; }
-        .cal-td-other { background-color: #F8F9FA; opacity: 0.55; }
-        .cal-td-today { background-color: #FFFDE7; border: 2px solid #FBC02D !important; }
-        .date-header { font-size: 13px; font-weight: 700; margin-bottom: 5px; color: #333; display: flex; justify-content: space-between; }
-        .today-tag { background: #FBC02D; color: #111; padding: 1px 6px; border-radius: 10px; font-size: 10px; font-weight: 800; }
+        .cal-wrapper {
+            background-color: #14171F;
+            border-radius: 10px;
+            padding: 4px;
+            border: 1px solid #2D3343;
+        }
+        .cal-table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+            font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+        .cal-th {
+            background-color: #161922;
+            color: #CBD5E1;
+            padding: 11px 8px;
+            text-align: center;
+            font-size: 13px;
+            font-weight: 700;
+            border: 1px solid #282E3D;
+            letter-spacing: 0.5px;
+        }
+        .cal-td {
+            height: 130px;
+            vertical-align: top;
+            padding: 7px;
+            border: 1px solid #282E3D;
+            background-color: #1E222D;
+            color: #E2E8F0;
+            transition: background-color 0.15s ease;
+        }
+        .cal-td:hover {
+            background-color: #252A38;
+        }
+        .cal-td-other {
+            background-color: #14171F;
+            color: #475569;
+        }
+        .cal-td-other .date-num {
+            color: #475569 !important;
+        }
+        .cal-td-today {
+            background-color: #26231F !important;
+            border: 1.5px solid #F59E0B !important;
+            box-shadow: inset 0 0 8px rgba(245, 158, 11, 0.12);
+        }
+        .date-header {
+            font-size: 13px;
+            font-weight: 700;
+            margin-bottom: 6px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .date-num {
+            color: #E2E8F0;
+        }
+        .date-sun { color: #F87171 !important; }
+        .date-sat { color: #60A5FA !important; }
+        .today-tag {
+            background: #F59E0B;
+            color: #111827;
+            padding: 1px 6px;
+            border-radius: 8px;
+            font-size: 10px;
+            font-weight: 800;
+        }
         .ev-badge {
             display: block;
             font-size: 11px;
             padding: 3px 6px;
-            margin-bottom: 3px;
+            margin-bottom: 4px;
             border-radius: 4px;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
             font-weight: 600;
-            line-height: 1.3;
+            line-height: 1.35;
         }
     </style>
+    <div class="cal-wrapper">
     <table class="cal-table">
         <thead>
             <tr>
-                <th class="cal-th" style="color:#FF8A80;">일 (SUN)</th>
+                <th class="cal-th" style="color:#F87171;">일 (SUN)</th>
                 <th class="cal-th">월 (MON)</th>
                 <th class="cal-th">화 (TUE)</th>
                 <th class="cal-th">수 (WED)</th>
                 <th class="cal-th">목 (THU)</th>
                 <th class="cal-th">금 (FRI)</th>
-                <th class="cal-th" style="color:#82B1FF;">토 (SAT)</th>
+                <th class="cal-th" style="color:#60A5FA;">토 (SAT)</th>
             </tr>
         </thead>
         <tbody>
@@ -377,7 +442,7 @@ def render_monthly_calendar_html(year, month, events_by_date, filter_types):
 
     for week in month_days:
         html += "<tr>"
-        for d in week:
+        for idx, d in enumerate(week):
             d_str = d.strftime("%Y-%m-%d")
             classes = ["cal-td"]
             if d.month != month:
@@ -385,25 +450,34 @@ def render_monthly_calendar_html(year, month, events_by_date, filter_types):
             if d_str == today_str:
                 classes.append("cal-td-today")
 
+            # 요일별 날짜 색상 (일요일 레드, 토요일 블루)
+            num_class = "date-num"
+            if d.month == month:
+                if idx == 0:
+                    num_class += " date-sun"
+                elif idx == 6:
+                    num_class += " date-sat"
+
             today_badge = '<span class="today-tag">TODAY</span>' if d_str == today_str else ""
             html += f'<td class="{" ".join(classes)}">'
-            html += f'<div class="date-header"><span>{d.day}</span>{today_badge}</div>'
+            html += f'<div class="date-header"><span class="{num_class}">{d.day}</span>{today_badge}</div>'
 
             day_events = events_by_date.get(d_str, [])
             for ev in day_events:
                 if ev["type"] not in filter_types:
                     continue
                 tooltip = f"{ev['icon']} {ev['name']} | {ev['detail']}"
+                border_col = ev.get("border", ev["color"])
                 html += (
                     f'<div class="ev-badge" title="{tooltip}" '
-                    f'style="color:{ev["color"]}; background-color:{ev["bg"]}; border-left: 3px solid {ev["color"]};">'
+                    f'style="color:{ev["color"]}; background-color:{ev["bg"]}; border-left: 3px solid {border_col};">'
                     f'{ev["icon"]} {ev["name"]} ({ev["qty"]:,})'
                     f'</div>'
                 )
             html += "</td>"
         html += "</tr>"
 
-    html += "</tbody></table>"
+    html += "</tbody></table></div>"
     st.markdown(html, unsafe_allow_html=True)
 
 
@@ -444,7 +518,7 @@ with st.sidebar:
 
     st.divider()
 
-    # --- 이지어드민 엑셀 업로드 (관리자 전용 활성화 또는 팀원도 재고 최신화 가능하도록 설정) ---
+    # --- 이지어드민 엑셀 업로드 ---
     st.subheader("📥 이지어드민 재고 엑셀 연동")
     uploaded_file = st.file_uploader("이지어드민 재고 파일 (.xlsx / .csv)", type=["xlsx", "xls", "csv"])
 
@@ -455,7 +529,6 @@ with st.sidebar:
             else:
                 df_ez = pd.read_excel(uploaded_file)
 
-            # 바코드 및 가용재고/현재고 컬럼 자동 탐색
             bc_col = next((c for c in df_ez.columns if "바코드" in str(c) or "barcode" in str(c).lower()), None)
             stock_col = next((c for c in df_ez.columns if any(k in str(c) for k in ["가용재고", "현재고", "재고", "정상재고"])), None)
             sales_col = next((c for c in df_ez.columns if any(k in str(c) for k in ["일평균", "판매량", "출고"])), None)
@@ -502,7 +575,7 @@ tab_calendar, tab_dashboard, tab_history, tab_master = st.tabs([
 
 
 # ---------------------------------------------------------
-# [TAB 1] 📅 재고·입고 캘린더 (팀원 공유용)
+# [TAB 1] 📅 재고·입고 캘린더 (팀원 공유용 - 다크모드)
 # ---------------------------------------------------------
 with tab_calendar:
     events_by_date, out_of_stock_list, stockout_soon_list, upcoming_arrivals, delayed_arrivals = (
@@ -512,7 +585,7 @@ with tab_calendar:
     # 상단 요약 KPI 카드 (4개)
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("🚨 현재 품절 상품 (재고 0)", f"{len(out_of_stock_list)}개", delta="즉시 입고일정 확인", delta_color="inverse")
-    k2.metric("🔥 품절 임박 / 단절 위험", f"{len(stockout_soon_list)}개", delta="입고 전 품절 주의", delta_color="off")
+    k2.metric("🔥 품절 임박 / 입고전품절", f"{len(stockout_soon_list)}개", delta="예약발송 전환/발주 점검", delta_color="off")
     k3.metric("📦 진행 중인 입고 예정", f"{len(upcoming_arrivals)}건")
     k4.metric("⚠️ 입고 예정일 경과(지연)", f"{len(delayed_arrivals)}건", delta="입고완료 처리 또는 공장 확인" if delayed_arrivals else "지연 없음", delta_color="inverse" if delayed_arrivals else "normal")
 
@@ -532,8 +605,8 @@ with tab_calendar:
     with c3:
         filter_types = st.multiselect(
             "달력에 표시할 항목",
-            options=["입고예정", "품절예정", "단절위험"],
-            default=["입고예정", "품절예정", "단절위험"]
+            options=["입고예정", "품절예정", "입고전품절"],
+            default=["입고예정", "품절예정", "입고전품절"]
         )
     with c4:
         cal_search = st.text_input("🔍 상품명 검색 필터", placeholder="예: Mag-Link, 폴드8, OctoLock...")
@@ -545,16 +618,17 @@ with tab_calendar:
         if matched:
             filtered_events[d_str] = matched
 
+    # 다크모드용 배지 범례 안내
     st.markdown(
         "💡 **일정 배지 안내:** &nbsp;"
-        "<span style='background:#E3F2FD;color:#1E88E5;padding:3px 8px;border-radius:4px;font-weight:bold;'>📦 입고예정 (수량)</span> &nbsp;"
-        "<span style='background:#FFF3E0;color:#EF6C00;padding:3px 8px;border-radius:4px;font-weight:bold;'>⚠️ 품절예정 (입고일 이후 소진)</span> &nbsp;"
-        "<span style='background:#FFEBEE;color:#D32F2F;padding:3px 8px;border-radius:4px;font-weight:bold;'>🔥 단절위험 (입고일보다 먼저 품절 예상)</span>",
+        "<span style='background:#172A45;color:#60A5FA;border-left:3px solid #3B82F6;padding:4px 10px;border-radius:4px;font-weight:bold;font-size:13px;'>📦 입고예정 (입고수량)</span> &nbsp;"
+        "<span style='background:#332414;color:#FBBF24;border-left:3px solid #F59E0B;padding:4px 10px;border-radius:4px;font-weight:bold;font-size:13px;'>⚠️ 품절예정 (입고일 이후 소진)</span> &nbsp;"
+        "<span style='background:#3B181E;color:#F87171;border-left:3px solid #EF4444;padding:4px 10px;border-radius:4px;font-weight:bold;font-size:13px;'>🔥 입고전품절 (입고일보다 먼저 품절 예상)</span>",
         unsafe_allow_html=True
     )
     st.write("")
 
-    # 월간 달력 렌더링
+    # 다크모드 월간 달력 렌더링
     render_monthly_calendar_html(sel_year, sel_month, filtered_events, filter_types)
 
     st.write("")
@@ -575,7 +649,7 @@ with tab_calendar:
     with col_detail_right:
         sub_t1, sub_t2, sub_t3 = st.tabs([
             f"🚨 현재 품절 ({len(out_of_stock_list)})",
-            f"🔥 품절 임박 · 단절 위험 ({len(stockout_soon_list)})",
+            f"🔥 품절 임박 · 입고전품절 ({len(stockout_soon_list)})",
             f"📦 전체 입고 예정 스케줄 ({len(upcoming_arrivals)})"
         ])
         with sub_t1:
@@ -588,7 +662,7 @@ with tab_calendar:
                 df_soon = pd.DataFrame(stockout_soon_list).sort_values("품절예상일")
                 st.dataframe(df_soon, use_container_width=True, hide_index=True)
             else:
-                st.success("향후 14일 이내 품절 임박 또는 입고 전 단절 위험 상품이 없습니다.")
+                st.success("향후 14일 이내 품절 임박 또는 입고전품절 위험 상품이 없습니다.")
         with sub_t3:
             if upcoming_arrivals:
                 df_inc = pd.DataFrame(upcoming_arrivals).sort_values("입고예정일")
@@ -607,7 +681,6 @@ with tab_dashboard:
     df_calc = calculate_reorder_table(products, po_history, holiday_buffer, target_days)
     urgent_df = df_calc[df_calc["발주선택"] == True]
 
-    # 상단 요약 지표 (관리자 여부에 따라 예산 노출 분기)
     m1, m2, m3 = st.columns(3)
     m1.metric("전체 관리 품목", f"{len(df_calc)}개")
     m2.metric("발주 권장/긴급 품목", f"{len(urgent_df)}개", delta="발주 검토 필요" if len(urgent_df) > 0 else "안정")
