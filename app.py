@@ -9,7 +9,7 @@ import requests
 from datetime import datetime, date, timedelta
 
 # =========================================================
-# 1. 기본 환경 설정 및 모바일 PWA 메타 태그 (앱 이름 반영)
+# 1. 기본 환경 설정 및 PWA 매니페스트 연결 (모바일 앱 이름 고정)
 # =========================================================
 st.set_page_config(
     page_title="FLICKRFOX 상품관리",
@@ -18,8 +18,11 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 스마트폰 홈 화면 추가 시 앱 이름과 테마가 "FLICKRFOX 상품관리"로 노출되도록 주입
+# 모바일 홈 화면 추가 시 앱 이름과 아이콘을 완벽하게 강제하는 설정
 st.markdown("""
+    <link rel="manifest" href="manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="FLICKRFOX 상품관리">
     <meta name="application-name" content="FLICKRFOX 상품관리">
     <meta name="theme-color" content="#14171F">
