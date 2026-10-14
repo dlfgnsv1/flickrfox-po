@@ -25,17 +25,14 @@ st.markdown("""
     html, body, [class*="css"] {
         font-family: 'Pretendard', -apple-system, sans-serif;
     }
-    
     .stApp {
         background-color: #0b0f14;
         color: #e6edf3;
     }
-    
     .tabular-num {
         font-family: 'JetBrains Mono', monospace;
         font-variant-numeric: tabular-nums;
     }
-
     .hero-banner {
         background: linear-gradient(135deg, rgba(16, 24, 32, 0.95) 0%, rgba(13, 31, 28, 0.95) 100%);
         border: 1px solid #1f3a34;
@@ -68,7 +65,6 @@ st.markdown("""
         font-size: 13px;
         margin: 0;
     }
-
     .kpi-card {
         background: #121820;
         border: 1px solid #212d3b;
@@ -91,7 +87,6 @@ st.markdown("""
         font-weight: 700;
         color: #f0f6fc;
     }
-
     .po-card {
         background: #11171f;
         border: 1px solid #222d3d;
@@ -134,31 +129,58 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 데이터 영구 저장 및 플리커폭스 주요 품목 초기화
+# 2. 데이터 영구 저장 및 플리커폭스 마스터 & 히스토리 초기화
 # ==========================================
 MASTER_FILE = "master_products.json"
 HISTORY_FILE = "po_history.json"
 
-# 이지어드민 실제 바코드와 주간 판매량 기반 핵심 주요 품목
+# 1) 주력 품목 마스터 (실제 이지어드민 바코드 및 해외 발주 단가 반영)
 DEFAULT_PRODUCTS = [
-    {"name": "[Mag-Link PRO] Black", "barcode": "FLCK00894", "supplier": "제조협력A", "lead_time": 14, "moq": 1000, "unit_price": 12500, "stock": 294, "daily_sales": 44.6, "status": "정상"},
-    {"name": "[Mag-Link PRO] Silver", "barcode": "FLCK00746", "supplier": "제조협력A", "lead_time": 14, "moq": 1000, "unit_price": 12500, "stock": 386, "daily_sales": 24.1, "status": "정상"},
-    {"name": "[360 TurnStand Wallet PLUS] Black", "barcode": "FLCK00587", "supplier": "제조협력B", "lead_time": 30, "moq": 1000, "unit_price": 8500, "stock": 466, "daily_sales": 37.7, "status": "정상"},
-    {"name": "[360 TurnStand Wallet PLUS] Green", "barcode": "FLCK00824", "supplier": "제조협력B", "lead_time": 30, "moq": 500, "unit_price": 8500, "stock": 370, "daily_sales": 10.3, "status": "정상"},
-    {"name": "[360 TurnStand Wallet PLUS] Brown", "barcode": "FLCK00825", "supplier": "제조협력B", "lead_time": 30, "moq": 500, "unit_price": 8500, "stock": 110, "daily_sales": 3.9, "status": "정상"},
-    {"name": "[OctoLock]", "barcode": "FLCK00609", "supplier": "제조협력C", "lead_time": 25, "moq": 1000, "unit_price": 6800, "stock": 173, "daily_sales": 28.4, "status": "정상"},
-    {"name": "[OctoLock PRO] Black", "barcode": "FLCK00659", "supplier": "제조협력C", "lead_time": 25, "moq": 500, "unit_price": 7900, "stock": 0, "daily_sales": 0.5, "status": "정상"},
-    {"name": "[MATTE-ONE] Z Fold 8", "barcode": "FLCK00867", "supplier": "케이스공장", "lead_time": 20, "moq": 500, "unit_price": 9500, "stock": 9, "daily_sales": 8.1, "status": "정상"},
-    {"name": "[MATTE-ONE] Z Fold 7", "barcode": "FLCK00868", "supplier": "케이스공장", "lead_time": 20, "moq": 500, "unit_price": 9500, "stock": 123, "daily_sales": 5.0, "status": "정상"},
-    {"name": "[MATTE-ONE] Z Fold 8 U", "barcode": "FLCK00869", "supplier": "케이스공장", "lead_time": 20, "moq": 500, "unit_price": 9500, "stock": 139, "daily_sales": 1.0, "status": "정상"},
-    {"name": "[Matte-Shield/MB] Z Fold 8", "barcode": "FLCK00890", "supplier": "케이스공장", "lead_time": 20, "moq": 1000, "unit_price": 9800, "stock": 391, "daily_sales": 25.1, "status": "정상"},
-    {"name": "[Matte-Shield/CW] Z Fold 8", "barcode": "FLCK00902", "supplier": "케이스공장", "lead_time": 20, "moq": 500, "unit_price": 9800, "stock": 14, "daily_sales": 11.9, "status": "정상"},
-    {"name": "[Matte-Shield] Z Fold 7", "barcode": "FLCK00895", "supplier": "케이스공장", "lead_time": 20, "moq": 500, "unit_price": 9800, "stock": 87, "daily_sales": 12.9, "status": "정상"},
-    {"name": "[Matte-Shield] Z Fold 8U", "barcode": "FLCK00891", "supplier": "케이스공장", "lead_time": 20, "moq": 500, "unit_price": 9800, "stock": 121, "daily_sales": 3.6, "status": "정상"},
-    {"name": "[Aim Mag-Holder Pro]", "barcode": "FLCK00755", "supplier": "제조협력A", "lead_time": 30, "moq": 500, "unit_price": 10500, "stock": 400, "daily_sales": 10.9, "status": "정상"},
-    {"name": "[Spring strap] Black", "barcode": "FLCK00838", "supplier": "부자재공장", "lead_time": 15, "moq": 1000, "unit_price": 1800, "stock": 302, "daily_sales": 37.4, "status": "정상"},
-    {"name": "[Spider mag stand] Arctic Silver", "barcode": "FLCK00728", "supplier": "제조협력A", "lead_time": 30, "moq": 500, "unit_price": 7500, "stock": 200, "daily_sales": 0.9, "status": "정상"},
-    {"name": "[SHIFT-GO]", "barcode": "FLCK00856", "supplier": "제조협력B", "lead_time": 30, "moq": 500, "unit_price": 8000, "stock": 0, "daily_sales": 0.0, "status": "정상"}
+    {"name": "[Mag-Link PRO] Black", "barcode": "FLCK00894", "supplier": "Aiweile", "lead_time": 30, "moq": 1000, "unit_price": 11105, "stock": 294, "daily_sales": 44.6, "status": "정상"},
+    {"name": "[Mag-Link PRO] Silver", "barcode": "FLCK00746", "supplier": "Aiweile", "lead_time": 30, "moq": 1000, "unit_price": 11105, "stock": 386, "daily_sales": 24.1, "status": "정상"},
+    {"name": "[360 TurnStand Wallet PLUS] Black", "barcode": "FLCK00587", "supplier": "Landscape", "lead_time": 27, "moq": 1000, "unit_price": 5191, "stock": 466, "daily_sales": 37.7, "status": "정상"},
+    {"name": "[360 TurnStand Wallet PLUS] Green", "barcode": "FLCK00824", "supplier": "Landscape", "lead_time": 27, "moq": 500, "unit_price": 5191, "stock": 370, "daily_sales": 10.3, "status": "정상"},
+    {"name": "[360 TurnStand Wallet PLUS] Brown", "barcode": "FLCK00825", "supplier": "Landscape", "lead_time": 27, "moq": 500, "unit_price": 5191, "stock": 110, "daily_sales": 3.9, "status": "정상"},
+    {"name": "[OctoLock]", "barcode": "FLCK00609", "supplier": "X-World", "lead_time": 20, "moq": 500, "unit_price": 2449, "stock": 173, "daily_sales": 28.4, "status": "정상"},
+    {"name": "[OctoLock PRO] Black", "barcode": "FLCK00659", "supplier": "Jiaqumo", "lead_time": 34, "moq": 500, "unit_price": 5403, "stock": 0, "daily_sales": 0.5, "status": "정상"},
+    {"name": "[MATTE-ONE] Z Fold 8", "barcode": "FLCK00867", "supplier": "Sanzhou", "lead_time": 17, "moq": 500, "unit_price": 2272, "stock": 9, "daily_sales": 8.1, "status": "정상"},
+    {"name": "[MATTE-ONE] Z Fold 7", "barcode": "FLCK00868", "supplier": "Sanzhou", "lead_time": 17, "moq": 500, "unit_price": 2272, "stock": 123, "daily_sales": 5.0, "status": "정상"},
+    {"name": "[MATTE-ONE] Z Fold 8 U", "barcode": "FLCK00869", "supplier": "Sanzhou", "lead_time": 17, "moq": 500, "unit_price": 2272, "stock": 139, "daily_sales": 1.0, "status": "정상"},
+    {"name": "[Matte-Shield/CW] Z Fold 8", "barcode": "FLCK00902", "supplier": "Swist", "lead_time": 20, "moq": 200, "unit_price": 6690, "stock": 14, "daily_sales": 11.9, "status": "정상"},
+    {"name": "[Matte-Shield/MB] Z Fold 8", "barcode": "FLCK00890", "supplier": "Swist", "lead_time": 20, "moq": 500, "unit_price": 6690, "stock": 391, "daily_sales": 25.1, "status": "정상"},
+    {"name": "[Matte-Shield] Z Fold 7", "barcode": "FLCK00895", "supplier": "Swist", "lead_time": 20, "moq": 500, "unit_price": 6690, "stock": 87, "daily_sales": 12.9, "status": "정상"},
+    {"name": "[Matte-Shield] Z Fold 8U", "barcode": "FLCK00891", "supplier": "Swist", "lead_time": 20, "moq": 500, "unit_price": 6690, "stock": 121, "daily_sales": 3.6, "status": "정상"},
+    {"name": "[Aim Mag-Holder Pro]", "barcode": "FLCK00755", "supplier": "Aiweile", "lead_time": 30, "moq": 500, "unit_price": 10500, "stock": 400, "daily_sales": 10.9, "status": "정상"},
+    {"name": "[Spring strap] Black", "barcode": "FLCK00838", "supplier": "D.y", "lead_time": 14, "moq": 1000, "unit_price": 308, "stock": 302, "daily_sales": 37.4, "status": "정상"},
+    {"name": "[Spider mag stand] Arctic Silver", "barcode": "FLCK00728", "supplier": "Aiweile", "lead_time": 30, "moq": 500, "unit_price": 7500, "stock": 200, "daily_sales": 0.9, "status": "정상"},
+    {"name": "[SHIFT-GO]", "barcode": "FLCK00856", "supplier": "Landscape", "lead_time": 30, "moq": 500, "unit_price": 8000, "stock": 0, "daily_sales": 0.0, "status": "정상"}
+]
+
+# 2) 캡처본 기준 실제 발주 내역 (도착 예정일 및 입고대기 수량 세부 반영)
+DEFAULT_HISTORY = [
+    {"order_id": "PO-261014-01", "date": "2026-10-14", "name": "[Mag-Link PRO] Black", "barcode": "FLCK00894", "supplier": "Aiweile", "po_qty": 1000, "unit_price": 11105, "total_price": 11105400, "expected_arrival": "2026-11-13", "status": "입고대기", "memo": "1차 결제 완료 (도착일정 조율중)"},
+    {"order_id": "PO-261013-01", "date": "2026-10-13", "name": "[360 TurnStand Wallet PLUS] Black", "barcode": "FLCK00587", "supplier": "Landscape", "po_qty": 1000, "unit_price": 5191, "total_price": 5191440, "expected_arrival": "2026-11-18", "status": "입고대기", "memo": "턴스탠드 1,220개 중 블랙 1,000개"},
+    {"order_id": "PO-261013-02", "date": "2026-10-13", "name": "[360 TurnStand Wallet PLUS] Green", "barcode": "FLCK00824", "supplier": "Landscape", "po_qty": 220, "unit_price": 5191, "total_price": 1142117, "expected_arrival": "2026-11-18", "status": "입고대기", "memo": "턴스탠드 1,220개 중 그린 220개"},
+    {"order_id": "PO-261012-01", "date": "2026-10-12", "name": "[Matte-Shield/CW] Z Fold 8", "barcode": "FLCK00902", "supplier": "Swist", "po_qty": 200, "unit_price": 6690, "total_price": 1338000, "expected_arrival": "2026-10-26", "status": "입고대기", "memo": "매트쉴드 폴드8 화이트 200개"},
+    {"order_id": "PO-261012-02", "date": "2026-10-12", "name": "[OctoLock]", "barcode": "FLCK00609", "supplier": "X-World", "po_qty": 500, "unit_price": 2449, "total_price": 1224270, "expected_arrival": "2026-11-03", "status": "입고대기", "memo": "옥토락 500개"},
+    {"order_id": "PO-261008-01", "date": "2026-10-08", "name": "[MATTE-ONE] Z Fold 8", "barcode": "FLCK00867", "supplier": "Sanzhou", "po_qty": 500, "unit_price": 2272, "total_price": 1135962, "expected_arrival": "2026-11-03", "status": "입고대기", "memo": "매트원 폴드8 500개 (주문승인)"},
+    {"order_id": "PO-261008-02", "date": "2026-10-08", "name": "[Mag-Link PRO] Silver", "barcode": "FLCK00746", "supplier": "Aiweile", "po_qty": 1000, "unit_price": 11105, "total_price": 11105400, "expected_arrival": "2026-11-27", "status": "입고대기", "memo": "맥링크프로 실버 1,000개"},
+    {"order_id": "PO-261008-03", "date": "2026-10-08", "name": "[Mag-Link PRO] Black", "barcode": "FLCK00894", "supplier": "Aiweile", "po_qty": 2000, "unit_price": 11105, "total_price": 22210800, "expected_arrival": "2026-11-27", "status": "입고대기", "memo": "맥링크프로 블랙 2,000개"},
+    {"order_id": "PO-260922-01", "date": "2026-09-22", "name": "[Mag-Link PRO] Silver", "barcode": "FLCK00746", "supplier": "Aiweile", "po_qty": 1000, "unit_price": 11105, "total_price": 11105400, "expected_arrival": "2026-11-03", "status": "입고대기", "memo": "맥링크프로 실버 1,000개"},
+    {"order_id": "PO-260922-02", "date": "2026-09-22", "name": "[Mag-Link PRO] Black", "barcode": "FLCK00894", "supplier": "Aiweile", "po_qty": 1500, "unit_price": 11105, "total_price": 16658100, "expected_arrival": "2026-11-02", "status": "입고대기", "memo": "맥링크프로 블랙 1,500개"},
+    {"order_id": "PO-260916-01", "date": "2026-09-16", "name": "[OctoLock PRO] Black", "barcode": "FLCK00659", "supplier": "Jiaqumo", "po_qty": 2500, "unit_price": 5403, "total_price": 13507110, "expected_arrival": "2026-10-29", "status": "입고대기", "memo": "옥토락프로 2,500개"},
+    {"order_id": "PO-261012-03", "date": "2026-10-12", "name": "맥링크 맥스 블랙", "barcode": "-", "supplier": "Aiweile", "po_qty": 300, "unit_price": 16056, "total_price": 4816800, "expected_arrival": "2026-11-17", "status": "입고대기", "memo": "주문승인 (2차결제 11/06)"},
+    {"order_id": "PO-261013-03", "date": "2026-10-13", "name": "폴리 스트랩 60cm", "barcode": "-", "supplier": "D.y", "po_qty": 1500, "unit_price": 308, "total_price": 461610, "expected_arrival": "2026-11-05", "status": "입고대기", "memo": "부자재"},
+    {"order_id": "PO-261013-04", "date": "2026-10-13", "name": "폴리 스트랩 30cm", "barcode": "-", "supplier": "D.y", "po_qty": 1500, "unit_price": 248, "total_price": 371295, "expected_arrival": "2026-11-05", "status": "입고대기", "memo": "부자재"},
+    {"order_id": "PO-261008-04", "date": "2026-10-08", "name": "행온택", "barcode": "FLCK00871", "supplier": "Gifts Manufactur", "po_qty": 5000, "unit_price": 165, "total_price": 822870, "expected_arrival": "2026-10-27", "status": "입고대기", "memo": "패키지 부자재"},
+    {"order_id": "PO-261007-01", "date": "2026-10-07", "name": "맥링크 O링", "barcode": "-", "supplier": "Xiangxing Hardware", "po_qty": 5000, "unit_price": 114, "total_price": 568650, "expected_arrival": "2026-10-20", "status": "입고대기", "memo": "부자재"},
+    {"order_id": "PO-261008-05", "date": "2026-10-08", "name": "맥링크 줄고리", "barcode": "-", "supplier": "Shenzhen Technolc", "po_qty": 5000, "unit_price": 21, "total_price": 107040, "expected_arrival": "2026-10-20", "status": "입고대기", "memo": "부자재"},
+    {"order_id": "PO-260921-01", "date": "2026-09-21", "name": "[Matte-Shield/MB] Z Fold 8", "barcode": "FLCK00890", "supplier": "Swist", "po_qty": 600, "unit_price": 6690, "total_price": 4014000, "expected_arrival": "2026-10-07", "status": "입고완료", "memo": "도착완료"},
+    {"order_id": "PO-260921-02", "date": "2026-09-21", "name": "[Matte-Shield] Z Fold 7", "barcode": "FLCK00895", "supplier": "Swist", "po_qty": 200, "unit_price": 6690, "total_price": 1338000, "expected_arrival": "2026-10-07", "status": "입고완료", "memo": "도착완료"},
+    {"order_id": "PO-260921-03", "date": "2026-09-21", "name": "[Matte-Shield] Z Fold 8U", "barcode": "FLCK00891", "supplier": "Swist", "po_qty": 150, "unit_price": 6690, "total_price": 1003500, "expected_arrival": "2026-10-07", "status": "입고완료", "memo": "도착완료"},
+    {"order_id": "PO-260916-02", "date": "2026-09-16", "name": "[MATTE-ONE] DUO", "barcode": "FLCK00905", "supplier": "Lumei", "po_qty": 100, "unit_price": 3077, "total_price": 307740, "expected_arrival": "2026-10-02", "status": "입고완료", "memo": "도착완료"},
+    {"order_id": "PO-260916-03", "date": "2026-09-16", "name": "[MATTE-ONE] 18PR", "barcode": "FLCK00903", "supplier": "Lumei", "po_qty": 100, "unit_price": 2542, "total_price": 254220, "expected_arrival": "2026-10-02", "status": "입고완료", "memo": "도착완료"},
+    {"order_id": "PO-260916-04", "date": "2026-09-16", "name": "[MATTE-ONE] 18PM", "barcode": "FLCK00904", "supplier": "Lumei", "po_qty": 50, "unit_price": 2542, "total_price": 127110, "expected_arrival": "2026-10-02", "status": "입고완료", "memo": "도착완료"}
 ]
 
 def load_master_data():
@@ -166,7 +188,6 @@ def load_master_data():
         try:
             with open(MASTER_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                # 이전 샘플 데이터(8809... 가짜 바코드)가 남아있다면 신규 마스터로 교체
                 if data and "88090001" not in str(data):
                     return data
         except Exception:
@@ -182,10 +203,12 @@ def load_history_data():
     if os.path.exists(HISTORY_FILE):
         try:
             with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+                if len(data) >= 5:
+                    return data
         except Exception:
             pass
-    return []
+    return DEFAULT_HISTORY
 
 def save_history_data(data):
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
@@ -244,17 +267,14 @@ with tab1:
                 df_ez[barcode_col] = df_ez[barcode_col].astype(str).str.strip()
                 matched_items = []
 
-                # 마스터에 등록된 주요 품목 바코드만 선별 동기화
                 for p in st.session_state.products:
                     target_bc = str(p.get("barcode", "")).strip()
                     match = df_ez[df_ez[barcode_col] == target_bc]
                     
                     if not match.empty:
-                        # 재고 업데이트
                         val = match[stock_col].values[0]
                         p["stock"] = max(0, int(pd.to_numeric(val, errors='coerce') or 0))
                         
-                        # 1주 발주합계가 있을 경우 일평균 판매량 자동 갱신 (1주 합계 ÷ 7)
                         if sales_col:
                             s_val = match[sales_col].values[0]
                             weekly_sales = float(pd.to_numeric(s_val, errors='coerce') or 0.0)
@@ -266,25 +286,24 @@ with tab1:
                 if matched_items:
                     save_master_data(st.session_state.products)
                     st.success(f"✅ 주요 품목 {len(matched_items)}건의 실시간 재고 및 판매량이 동기화되었습니다!")
-                    with st.expander("동기화된 주요 품목 목록 확인"):
-                        st.write(", ".join(matched_items))
                     st.rerun()
                 else:
                     st.warning("⚠️ 엑셀은 정상 인식되었으나 등록된 주요 품목 바코드와 일치하는 데이터가 없습니다.")
         except Exception as e:
             st.error(f"엑셀 처리 오류: {e}")
 
-    # 발주 수량 및 위험도 계산
-    dashboard_items = []
-    total_suggested_cost = 0
-    urgent_count = 0
-    warning_count = 0
-
+    # 입고대기 수량 실시간 집계
     pending_stock_map = {}
     for h in st.session_state.po_history:
         if h.get("status") == "입고대기":
             bc = str(h.get("barcode", "")).strip()
-            pending_stock_map[bc] = pending_stock_map.get(bc, 0) + int(h.get("po_qty", 0))
+            if bc and bc != "-":
+                pending_stock_map[bc] = pending_stock_map.get(bc, 0) + int(h.get("po_qty", 0))
+
+    dashboard_items = []
+    total_suggested_cost = 0
+    urgent_count = 0
+    warning_count = 0
 
     for p in st.session_state.products:
         bc = str(p.get("barcode", "")).strip()
@@ -346,7 +365,7 @@ with tab1:
     urgency_order = {"urgent": 0, "warning": 1, "normal": 2}
     dashboard_items.sort(key=lambda x: (urgency_order[x["urgency"]], x["days_left"]))
 
-    # 상단 4대 핵심 지표
+    # 4대 핵심 지표 카드
     st.markdown("<br>", unsafe_allow_html=True)
     c1, c2, c3, c4 = st.columns(4)
     with c1:
@@ -378,14 +397,14 @@ with tab1:
         </div>
         """, unsafe_allow_html=True)
 
-    # 슬랙 알림 발송 버튼
+    # 슬랙 전송 버튼
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("🚀 슬랙으로 발주 권고요약 전송", type="primary", use_container_width=True):
         if not slack_webhook:
             st.error("사이드바에 슬랙 Webhook URL을 먼저 입력해 주세요.")
         else:
             urgent_lines = [
-                f"• *{item['product']['name']}* : 제안 {item['suggested_qty']:,}개 (소진예상 {item['days_left']:.1f}일 후, 가용 {item['stock']}개)"
+                f"• *{item['product']['name']}* : 제안 {item['suggested_qty']:,}개 (소진예상 {item['days_left']:.1f}일 후, 가용 {item['stock']}개, 입고대기 {item['pending_stock']}개)"
                 for item in dashboard_items if item["urgency"] == "urgent"
             ]
             msg_payload = {
@@ -419,7 +438,7 @@ with tab1:
 
     st.markdown("---")
 
-    # 품목별 발주 결정 카드
+    # 품목별 발주 결정 카드 목록
     for idx, item in enumerate(dashboard_items):
         p = item["product"]
         card_class = item["urgency"]
@@ -472,7 +491,8 @@ with tab1:
                         "unit_price": int(p["unit_price"]),
                         "total_price": int(order_qty * p["unit_price"]),
                         "expected_arrival": exp_date,
-                        "status": "입고대기"
+                        "status": "입고대기",
+                        "memo": "대시보드 직접 발주"
                     }
                     st.session_state.po_history.append(new_order)
                     save_history_data(st.session_state.po_history)
@@ -484,51 +504,91 @@ with tab1:
             st.caption(f"💰 발주 금액: **{calc_cost:,}원** (단가: {p.get('unit_price', 0):,}원)")
 
 # ==========================================
-# TAB 2: 발주 히스토리
+# TAB 2: 발주 히스토리 (입고대기 수정 & 관리)
 # ==========================================
 with tab2:
-    st.markdown("### 📜 발주 진행 및 입고 관리 히스토리")
-    if not st.session_state.po_history:
-        st.info("아직 등록된 발주 내역이 없습니다. [발주 대시보드]에서 발주를 확정해 보세요.")
-    else:
-        df_hist = pd.DataFrame(st.session_state.po_history)
-        st.dataframe(df_hist, use_container_width=True)
+    st.markdown("### 📜 발주 진행 및 입고대기 관리")
+    st.caption("💡 표 안의 수량(po_qty), 입고예정일, 진행상태('입고대기'/'입고완료'/'발주취소')를 직접 더블클릭해 수정하거나 행을 삭제할 수 있습니다.")
 
-        st.markdown("#### 📦 물품 입고 완료 처리")
-        pending_list = [h for h in st.session_state.po_history if h.get("status") == "입고대기"]
-        
-        if not pending_list:
-            st.success("🎉 현재 입고 대기 중인 발주 건이 없습니다.")
-        else:
-            col_sel, col_btn = st.columns([3, 1])
-            with col_sel:
-                selected_po = st.selectbox(
-                    "입고 완료할 발주 건 선택",
-                    options=[h["order_id"] for h in pending_list],
-                    format_func=lambda x: next((f"[{h['order_id']}] {h['name']} ({h['po_qty']:,}개) - 예정: {h['expected_arrival']}" for h in pending_list if h['order_id'] == x), x)
-                )
-            with col_btn:
-                st.write("")
-                st.write("")
-                if st.button("📦 입고 완료 종결", type="primary", use_container_width=True):
-                    for h in st.session_state.po_history:
-                        if h["order_id"] == selected_po:
-                            h["status"] = "입고완료"
-                            for p in st.session_state.products:
-                                if str(p["barcode"]).strip() == str(h["barcode"]).strip():
-                                    p["stock"] = p.get("stock", 0) + h["po_qty"]
-                            break
-                    save_history_data(st.session_state.po_history)
-                    save_master_data(st.session_state.products)
-                    st.success("✅ 입고 처리가 완료되어 실재고에 반영되었습니다!")
-                    st.rerun()
+    col_h_btn1, col_h_btn2 = st.columns([2, 5])
+    with col_h_btn1:
+        if st.button("🔄 캡처본 기준 입고대기 목록으로 초기화", help="초기 캡처본 데이터로 되돌립니다."):
+            save_history_data(DEFAULT_HISTORY)
+            st.success("✅ 입고대기 목록이 캡처본 데이터로 초기화되었습니다!")
+            st.rerun()
+
+    df_hist = pd.DataFrame(st.session_state.po_history)
+    
+    # 엑셀형 인터랙티브 에디터
+    edited_hist = st.data_editor(
+        df_hist,
+        num_rows="dynamic",
+        use_container_width=True,
+        column_config={
+            "order_id": st.column_config.TextColumn("발주번호"),
+            "date": st.column_config.TextColumn("발주일자"),
+            "name": st.column_config.TextColumn("품목명"),
+            "barcode": st.column_config.TextColumn("바코드"),
+            "supplier": st.column_config.TextColumn("거래처"),
+            "po_qty": st.column_config.NumberColumn("발주수량(개)", min_value=0, step=100, format="%d개"),
+            "unit_price": st.column_config.NumberColumn("단가", format="₩%d"),
+            "total_price": st.column_config.NumberColumn("합계금액", format="₩%d"),
+            "expected_arrival": st.column_config.TextColumn("입고예정일"),
+            "status": st.column_config.SelectboxColumn("진행상태", options=["입고대기", "입고완료", "발주취소"]),
+            "memo": st.column_config.TextColumn("비고/메모")
+        },
+        key="history_data_editor_final"
+    )
+
+    if st.button("💾 히스토리 변경사항 저장", type="primary", use_container_width=True):
+        cleaned_records = edited_hist.dropna(subset=["order_id"]).to_dict("records")
+        save_history_data(cleaned_records)
+        st.success("✅ 히스토리 수정 내용이 저장되었습니다!")
+        st.rerun()
+
+    st.markdown("---")
+    st.markdown("#### 📦 물품 도착 시 원터치 입고 처리")
+    pending_list = [h for h in st.session_state.po_history if h.get("status") == "입고대기"]
+    
+    if not pending_list:
+        st.success("🎉 현재 입고 대기 중인 발주 건이 없습니다.")
+    else:
+        col_sel, col_btn = st.columns([3, 1])
+        with col_sel:
+            selected_po = st.selectbox(
+                "입고 완료할 발주 건 선택",
+                options=[h["order_id"] for h in pending_list],
+                format_func=lambda x: next((f"[{h['order_id']}] {h['name']} ({h['po_qty']:,}개) - 도착예정: {h['expected_arrival']}" for h in pending_list if h['order_id'] == x), x)
+            )
+        with col_btn:
+            st.write("")
+            st.write("")
+            if st.button("📦 입고 완료 종결", type="primary", use_container_width=True):
+                for h in st.session_state.po_history:
+                    if h["order_id"] == selected_po:
+                        h["status"] = "입고완료"
+                        for p in st.session_state.products:
+                            if str(p["barcode"]).strip() == str(h["barcode"]).strip():
+                                p["stock"] = p.get("stock", 0) + int(h["po_qty"])
+                        break
+                save_history_data(st.session_state.po_history)
+                save_master_data(st.session_state.products)
+                st.success("✅ 입고 처리가 완료되어 실재고에 가산되었습니다!")
+                st.rerun()
 
 # ==========================================
 # TAB 3: 품목 마스터
 # ==========================================
 with tab3:
     st.markdown("### 📦 FLICKRFOX 주요 품목 마스터 관리")
-    st.caption("💡 표의 셀을 더블클릭하여 품목명, 바코드, 리드타임(LT), MOQ, 단가 등을 직접 수정할 수 있습니다. (신규 품목은 맨 아래 빈 줄에 직접 추가)")
+    st.caption("💡 표의 셀을 더블클릭하여 품목명, 바코드, 리드타임(LT), MOQ, 단가 등을 직접 수정할 수 있습니다.")
+
+    col_m_btn1, col_m_btn2 = st.columns([2, 5])
+    with col_m_btn1:
+        if st.button("🔄 주력 품목 마스터 기본값으로 초기화"):
+            save_master_data(DEFAULT_PRODUCTS)
+            st.success("✅ 품목 마스터가 기본 주요 품목으로 초기화되었습니다!")
+            st.rerun()
 
     df_master = pd.DataFrame(st.session_state.products)
     cols_order = ["name", "barcode", "supplier", "lead_time", "moq", "unit_price", "stock", "daily_sales", "status"]
@@ -552,16 +612,11 @@ with tab3:
             "daily_sales": st.column_config.NumberColumn("일평균 판매량", min_value=0.0, step=0.1, format="%.1f개"),
             "status": st.column_config.SelectboxColumn("운영 상태", options=["정상", "단종예정", "일시품절"], default="정상")
         },
-        key="master_data_editor_v2"
+        key="master_data_editor_v3"
     )
 
-    col_btn1, col_btn2 = st.columns([1, 4])
-    with col_btn1:
-        if st.button("💾 품목 마스터 저장", type="primary", use_container_width=True):
-            cleaned_records = edited_df.dropna(subset=["name", "barcode"]).to_dict("records")
-            save_master_data(cleaned_records)
-            st.success("✅ 품목 마스터가 영구 저장되었습니다!")
-            st.rerun()
-
-    with col_btn2:
-        st.info("ℹ️ 바코드가 일치하는 주력 품목만 엑셀에서 추출되며, 리드타임과 MOQ, 입고단가는 여기서 언제든 수정 후 저장하실 수 있습니다.")
+    if st.button("💾 품목 마스터 저장", type="primary", use_container_width=True):
+        cleaned_records = edited_df.dropna(subset=["name", "barcode"]).to_dict("records")
+        save_master_data(cleaned_records)
+        st.success("✅ 품목 마스터가 영구 저장되었습니다!")
+        st.rerun()
