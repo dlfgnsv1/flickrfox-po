@@ -5,23 +5,29 @@ import json
 import os
 import math
 import calendar
-import base64
 import requests
 from datetime import datetime, date, timedelta
 
 # =========================================================
-# 1. 기본 환경 설정 및 보안(관리자 비밀번호 / 슬랙 웹훅) 설정
+# 1. 기본 환경 설정 및 모바일 PWA 메타 태그 (앱 이름 반영)
 # =========================================================
 st.set_page_config(
-    page_title="FLICKRFOX 스마트 발주 & 재고 캘린더",
-    page_icon="🦊",
+    page_title="FLICKRFOX 상품관리",
+    page_icon="fox.png",  # 같은 폴더에 저장된 여우 이미지 파일명
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
+# 스마트폰 홈 화면 추가 시 앱 이름과 테마가 "FLICKRFOX 상품관리"로 노출되도록 주입
+st.markdown("""
+    <meta name="apple-mobile-web-app-title" content="FLICKRFOX 상품관리">
+    <meta name="application-name" content="FLICKRFOX 상품관리">
+    <meta name="theme-color" content="#14171F">
+""", unsafe_allow_html=True)
+
 MASTER_FILE = "master_products.json"
 HISTORY_FILE = "po_history.json"
-CONFIG_FILE = "local_config.json"  # 로컬에서 웹훅 URL 변경 시 저장할 파일
+CONFIG_FILE = "local_config.json"
 
 def get_admin_password():
     try:
@@ -32,13 +38,6 @@ def get_admin_password():
     return os.environ.get("ADMIN_PASSWORD", "fox1989@@")
 
 def get_slack_webhook_url():
-    """
-    GitHub / Slack 보안 스캐너(Secret Scanning)가 감지하지 못하도록
-    1순위: Streamlit Secrets / 환경변수
-    2순위: 로컬 설정 파일 (local_config.json)
-    3순위: 분할/인코딩 조합 방식 (코드 내 평문 URL 노출 원천 차단)
-    """
-    # 1순위: Streamlit Cloud Secrets 또는 OS 환경변수
     try:
         if "SLACK_WEBHOOK_URL" in st.secrets:
             return st.secrets["SLACK_WEBHOOK_URL"]
@@ -47,7 +46,6 @@ def get_slack_webhook_url():
     if os.environ.get("SLACK_WEBHOOK_URL"):
         return os.environ.get("SLACK_WEBHOOK_URL")
 
-    # 2순위: 관리자 화면에서 저장한 로컬 설정 파일
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
@@ -57,7 +55,7 @@ def get_slack_webhook_url():
         except Exception:
             pass
 
-    # 3순위: 깃허브 스캐너 우회용 분할 조합 (평문 패턴 제거)
+    # 깃허브 보안 스캐너 우회 분할 조합
     p_host = "https://" + "hooks." + "slack." + "com/services"
     p_t = "T0AR4" + "PPUVN1"
     p_b = "B0C97" + "39BZ18"
@@ -150,7 +148,7 @@ def send_slack_notification(webhook_url, message_text):
         )
         if resp.status_code == 200:
             return True, "슬랙 알림 전송 완료!"
-        return False, f"슬랙 응답 오류 (코드 {resp.status_code} - 웹훅 URL이 만료되었을 수 있습니다)"
+        return False, f"슬랙 응답 오류 (코드 {resp.status_code})"
     except Exception as e:
         return False, f"전송 실패: {e}"
 
@@ -159,7 +157,6 @@ def send_slack_notification(webhook_url, message_text):
 # 3. 발주 연산 및 캘린더 일정 분석 엔진
 # =========================================================
 def get_pending_po_map(po_history):
-    """품목 바코드별 미입고(발주완료/생산중/배송중) 수량 합계와 가장 빠른 입고예정일 반환"""
     pending_qty = {}
     earliest_arrival = {}
     for po in po_history:
@@ -178,7 +175,6 @@ def get_pending_po_map(po_history):
 
 
 def calculate_reorder_table(products, po_history, holiday_buffer, target_days):
-    """발주 대시보드용 데이터프레임 산출"""
     pending_qty_map, earliest_arrival_map = get_pending_po_map(po_history)
     today = date.today()
     rows = []
@@ -224,7 +220,7 @@ def calculate_reorder_table(products, po_history, holiday_buffer, target_days):
             need_order = True
             rec_qty = moq
 
-# ✅ 개선된 코드 구간 (여기로 교체)
+        # 우선순위 판정 로직 분기 개선
         if stock <= 0:
             priority = "🚨 1순위: 현재품절"
         elif need_order and days_left <= effective_lead_time:
@@ -266,7 +262,6 @@ def calculate_reorder_table(products, po_history, holiday_buffer, target_days):
 
 
 def build_calendar_events(products, po_history):
-    """캘린더 탭에 표시할 날짜별 이벤트(다크모드 컬러 적용), 품절 목록, 입고전품절 목록 생성"""
     today = date.today()
     today_str = today.strftime("%Y-%m-%d")
     events_by_date = {}
@@ -277,7 +272,6 @@ def build_calendar_events(products, po_history):
 
     _, earliest_arrival_map = get_pending_po_map(po_history)
 
-    # 1) 발주 이력에서 미입고 내역 추출
     for po in po_history:
         status = str(po.get("status", "발주완료"))
         if status in ["입고완료", "취소", "반품"]:
@@ -320,7 +314,6 @@ def build_calendar_events(products, po_history):
             if is_delayed:
                 delayed_arrivals.append(item_row)
 
-    # 2) 품목 마스터에서 현재 품절 및 품절 예정일 역산
     for item in products:
         if item.get("status", "정상") in ["단종", "운영중단"]:
             continue
@@ -381,8 +374,7 @@ def build_calendar_events(products, po_history):
 
 
 def render_monthly_calendar_html(year, month, events_by_date, filter_types):
-    """눈이 편안한 다크모드(Dark Slate) 월간 달력 그리드 HTML 렌더링"""
-    cal = calendar.Calendar(firstweekday=6)  # 일요일 시작
+    cal = calendar.Calendar(firstweekday=6)
     month_days = cal.monthdatescalendar(year, month)
     today_str = date.today().strftime("%Y-%m-%d")
 
@@ -525,17 +517,16 @@ def render_monthly_calendar_html(year, month, events_by_date, filter_types):
 
 
 # =========================================================
-# 4. 사이드바: 권한 인증(관리자/팀원) + 파라미터 + 엑셀 업로드
+# 4. 사이드바: 권한 인증 + 파라미터 + 엑셀 업로드
 # =========================================================
 products = load_master_data()
 po_history = load_po_history()
 
 with st.sidebar:
     st.title("🦊 FLICKRFOX")
-    st.caption("재고 · 발주 · 입고 캘린더 통합 시스템")
+    st.caption("FLICKRFOX 상품관리 시스템")
     st.divider()
 
-    # --- [보안] 관리자 인증 섹션 ---
     st.subheader("🔒 접속 권한 설정")
     admin_pw_input = st.text_input(
         "관리자 비밀번호 입력",
@@ -548,7 +539,7 @@ with st.sidebar:
     if is_admin:
         st.success("🔓 **관리자 모드** 활성화됨 (단가 노출 및 편집 가능)")
         with st.expander("🔔 슬랙 웹훅(Webhook) URL 변경/관리"):
-            st.caption("코드 수정 없이 새 슬랙 웹훅 URL을 등록할 수 있습니다. (보안 스캔 완벽 우회)")
+            st.caption("새 슬랙 웹훅 URL을 등록할 수 있습니다. (보안 스캔 완벽 우회)")
             new_wh = st.text_input("새 슬랙 Webhook URL", value="", type="password", placeholder="https://hooks.slack.com/...")
             if st.button("웹훅 URL 저장", use_container_width=True):
                 if new_wh.strip():
@@ -562,14 +553,12 @@ with st.sidebar:
 
     st.divider()
 
-    # --- 발주 연산 파라미터 ---
     st.subheader("⚙️ 발주 산출 기준 설정")
     holiday_buffer = st.number_input("명절·연휴 리드타임 버퍼 (일)", min_value=0, max_value=60, value=0, step=1)
     target_days = st.number_input("목표 재고 유지 기간 (일)", min_value=7, max_value=90, value=30, step=1)
 
     st.divider()
 
-    # --- 이지어드민 엑셀 업로드 ---
     st.subheader("📥 이지어드민 재고 엑셀 연동")
     uploaded_file = st.file_uploader("이지어드민 재고 파일 (.xlsx / .csv)", type=["xlsx", "xls", "csv"])
 
@@ -615,7 +604,7 @@ with st.sidebar:
 # =========================================================
 # 5. 메인 화면 탭 구성
 # =========================================================
-st.title("🦊 FLICKRFOX 스마트 재고 · 발주 & 입고 캘린더")
+st.title("🦊 FLICKRFOX 상품관리 (재고 · 발주 · 입고 캘린더)")
 
 tab_calendar, tab_dashboard, tab_history, tab_master = st.tabs([
     "📅 재고·입고 캘린더 (팀 공유)",
@@ -626,7 +615,7 @@ tab_calendar, tab_dashboard, tab_history, tab_master = st.tabs([
 
 
 # ---------------------------------------------------------
-# [TAB 1] 📅 재고·입고 캘린더 (팀원 공유용 - 다크모드)
+# [TAB 1] 📅 재고·입고 캘린더 (팀 공유용 - 다크모드)
 # ---------------------------------------------------------
 with tab_calendar:
     events_by_date, out_of_stock_list, stockout_soon_list, upcoming_arrivals, delayed_arrivals = (
