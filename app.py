@@ -29,7 +29,7 @@ def get_admin_password():
             return st.secrets["ADMIN_PASSWORD"]
     except Exception:
         pass
-    return os.environ.get("ADMIN_PASSWORD", "flickrfox")
+    return os.environ.get("ADMIN_PASSWORD", "fox1989@@")
 
 def get_slack_webhook_url():
     """
