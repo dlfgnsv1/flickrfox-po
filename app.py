@@ -67,28 +67,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-MASTER_FILE = "master_products.json"
-HISTORY_FILE = "po_history.json"
-MEMO_FILE = "calendar_memos.json"
-CONFIG_FILE = "local_config.json"
-
 ADMIN_PASSWORD = "fox1989@@"
-
-def safe_int(val, default=0):
-    try:
-        if val is None or val == "":
-            return default
-        return int(float(str(val).replace(",", "").replace("원", "").replace("개", "").strip()))
-    except Exception:
-        return default
-
-def safe_float(val, default=0.0):
-    try:
-        if val is None or val == "":
-            return default
-        return float(str(val).replace(",", "").strip())
-    except Exception:
-        return default
+CONFIG_FILE = "local_config.json"
 
 def get_slack_webhook_url():
     try:
@@ -177,72 +157,60 @@ DEFAULT_HISTORY = [
     {"order_id": "PO-20260916-25", "date": "2026-09-16", "name": "매트원 18pro max", "barcode": "FLCK00867", "supplier": "Lumei", "po_qty": 50, "unit_price": 2542, "total_price": 127110, "expected_arrival": "2026-10-02", "status": "발주완료", "memo": "리드타임 7일"}
 ]
 
-
 # =========================================================
-# 2. 데이터 입출력 함수 (안전장치 포함)
+# 2. 메모리(Session State) 기반 영구 데이터 관리 함수
 # =========================================================
 def load_master_data():
-    if os.path.exists(MASTER_FILE):
-        try:
-            with open(MASTER_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if data:
-                    return data
-        except Exception:
-            pass
-    save_master_data(DEFAULT_PRODUCTS)
-    return DEFAULT_PRODUCTS
+    if "master_data" not in st.session_state:
+        st.session_state["master_data"] = DEFAULT_PRODUCTS
+    return st.session_state["master_data"]
 
 def save_master_data(data):
-    with open(MASTER_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    st.session_state["master_data"] = data
 
 def load_po_history():
-    history = []
-    if os.path.exists(HISTORY_FILE):
-        try:
-            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-                history = json.load(f)
-        except Exception:
-            history = []
-    
-    if not history:
-        history = DEFAULT_HISTORY
-
-    today_str = date.today().strftime("%Y-%m-%d")
-    updated = False
-    for po in history:
-        status = str(po.get("status", "발주완료"))
-        arr_date = str(po.get("expected_arrival", ""))[:10]
-        if arr_date and arr_date < today_str and status not in ["입고완료", "취소", "반품"]:
-            po["status"] = "입고완료"
-            updated = True
-
-    if updated:
-        save_po_history(history)
-
-    return history
+    if "po_history" not in st.session_state:
+        # 과거 도착일이 지난 건은 자동으로 '입고완료' 처리
+        today_str = date.today().strftime("%Y-%m-%d")
+        history = list(DEFAULT_HISTORY)
+        for po in history:
+            status = str(po.get("status", "발주완료"))
+            arr_date = str(po.get("expected_arrival", ""))[:10]
+            if arr_date and arr_date < today_str and status not in ["입고완료", "취소", "반품"]:
+                po["status"] = "입고완료"
+        st.session_state["po_history"] = history
+    return st.session_state["po_history"]
 
 def save_po_history(history):
-    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-        json.dump(history, f, ensure_ascii=False, indent=2)
+    st.session_state["po_history"] = history
 
 def load_memo_data():
-    if os.path.exists(MEMO_FILE):
-        try:
-            with open(MEMO_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-    return {}
+    if "memo_data" not in st.session_state:
+        st.session_state["memo_data"] = {}
+    return st.session_state["memo_data"]
 
 def save_memo_data(memos):
-    with open(MEMO_FILE, "w", encoding="utf-8") as f:
-        json.dump(memos, f, ensure_ascii=False, indent=2)
+    st.session_state["memo_data"] = memos
+
+def safe_int(val, default=0):
+    try:
+        if val is None or val == "":
+            return default
+        return int(float(str(val).replace(",", "").replace("원", "").replace("개", "").strip()))
+    except Exception:
+        return default
+
+def safe_float(val, default=0.0):
+    try:
+        if val is None or val == "":
+            return default
+        return float(str(val).replace(",", "").strip())
+    except Exception:
+        return default
 
 def send_slack_notification(webhook_url, message_text):
     if not webhook_url:
-        return False, "슬랙 Webhook URL이 설정되지 않았습니다."
+        return False, "슬랙 웹훅 URL이 설정되지 않았습니다."
     try:
         resp = requests.post(
             webhook_url,
@@ -671,7 +639,7 @@ with st.sidebar:
                     st.rerun()
                     
         with st.expander("💾 데이터 백업 및 복구"):
-            st.caption("서버 리부팅 대비 데이터 백업/복구")
+            st.caption("메모리 기반 백업/복구 (세션 영구 보존)")
             backup_payload = {
                 "master": products,
                 "history": po_history,
