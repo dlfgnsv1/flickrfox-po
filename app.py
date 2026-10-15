@@ -9,27 +9,34 @@ import requests
 from datetime import datetime, date, timedelta
 
 # =========================================================
-# 1. 기본 환경 설정 및 PWA 매니페스트 연결 (모바일 앱 이름 고정)
+# 1. 기본 환경 설정 및 모바일 최적화 메타 태그
 # =========================================================
 st.set_page_config(
     page_title="FLICKRFOX 상품관리",
-    page_icon="fox.png",  # 같은 폴더에 저장된 여우 이미지 파일명
+    page_icon="fox.png",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# 모바일 홈 화면 추가 시 앱 이름과 아이콘을 완벽하게 강제하는 설정
+# 모바일 가독성 및 PWA 대응 메타 태그
 st.markdown("""
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="manifest" href="manifest.json">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="FLICKRFOX 상품관리">
     <meta name="application-name" content="FLICKRFOX 상품관리">
     <meta name="theme-color" content="#14171F">
+    <style>
+        /* 전반적인 가독성 향상을 위한 간격 및 여백 확보 */
+        .block-container { padding-top: 2rem; padding-bottom: 3rem; }
+        div[data-testid="stMetricValue"] { font-size: 1.6rem !important; }
+    </style>
 """, unsafe_allow_html=True)
 
 MASTER_FILE = "master_products.json"
 HISTORY_FILE = "po_history.json"
+MEMO_FILE = "calendar_memos.json"  # 1번 기능: 날짜별 메모 저장 파일
 CONFIG_FILE = "local_config.json"
 
 def get_admin_password():
@@ -104,7 +111,7 @@ DEFAULT_PRODUCTS = [
 
 
 # =========================================================
-# 2. 데이터 입출력 및 유틸리티 함수
+# 2. 데이터 입출력 함수 (마스터, 히스토리, 메모)
 # =========================================================
 def load_master_data():
     if os.path.exists(MASTER_FILE):
@@ -118,11 +125,9 @@ def load_master_data():
     save_master_data(DEFAULT_PRODUCTS)
     return DEFAULT_PRODUCTS
 
-
 def save_master_data(data):
     with open(MASTER_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-
 
 def load_po_history():
     if os.path.exists(HISTORY_FILE):
@@ -133,11 +138,23 @@ def load_po_history():
             return []
     return []
 
-
 def save_po_history(history):
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
         json.dump(history, f, ensure_ascii=False, indent=2)
 
+def load_memo_data():
+    """1번 기능: 날짜별 운영 메모/특이사항 데이터 로드"""
+    if os.path.exists(MEMO_FILE):
+        try:
+            with open(MEMO_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_memo_data(memos):
+    with open(MEMO_FILE, "w", encoding="utf-8") as f:
+        json.dump(memos, f, ensure_ascii=False, indent=2)
 
 def send_slack_notification(webhook_url, message_text):
     if not webhook_url:
@@ -157,7 +174,7 @@ def send_slack_notification(webhook_url, message_text):
 
 
 # =========================================================
-# 3. 발주 연산 및 캘린더 일정 분석 엔진
+# 3. 발주 연산 및 마케팅 판매량 가중치 적용 엔진
 # =========================================================
 def get_pending_po_map(po_history):
     pending_qty = {}
@@ -176,8 +193,8 @@ def get_pending_po_map(po_history):
                     earliest_arrival[bc] = {"date": arr, "qty": qty}
     return pending_qty, earliest_arrival
 
-
-def calculate_reorder_table(products, po_history, holiday_buffer, target_days):
+def calculate_reorder_table(products, po_history, holiday_buffer, target_days, sales_multiplier):
+    """2번 기능: 마케팅 판매량 가중치(multiplier)를 반영한 스마트 발주 연산"""
     pending_qty_map, earliest_arrival_map = get_pending_po_map(po_history)
     today = date.today()
     rows = []
@@ -194,20 +211,23 @@ def calculate_reorder_table(products, po_history, holiday_buffer, target_days):
         moq = int(item.get("moq", 500) or 500)
         unit_price = int(item.get("unit_price", 0) or 0)
         stock = int(item.get("stock", 0) or 0)
-        daily_sales = float(item.get("daily_sales", 0.0) or 0.0)
+        
+        # 기본 일판메량에 마케팅 가중치 적용
+        base_sales = float(item.get("daily_sales", 0.0) or 0.0)
+        adjusted_sales = round(base_sales * sales_multiplier, 1)
 
         incoming_qty = pending_qty_map.get(bc, 0)
         effective_stock = stock + incoming_qty
         effective_lead_time = lead_time + holiday_buffer
 
-        rop = math.ceil(daily_sales * effective_lead_time)
-        target_stock = math.ceil(daily_sales * (effective_lead_time + target_days))
+        rop = math.ceil(adjusted_sales * effective_lead_time)
+        target_stock = math.ceil(adjusted_sales * (effective_lead_time + target_days))
 
         if stock <= 0:
             days_left = 0
             stockout_date_str = "현재 품절 🚨"
-        elif daily_sales > 0:
-            days_left = int(stock // daily_sales)
+        elif adjusted_sales > 0:
+            days_left = int(stock // adjusted_sales)
             stockout_date_str = (today + timedelta(days=days_left)).strftime("%Y-%m-%d")
         else:
             days_left = 999
@@ -215,15 +235,14 @@ def calculate_reorder_table(products, po_history, holiday_buffer, target_days):
 
         need_order = False
         rec_qty = 0
-        if daily_sales > 0 and effective_stock <= rop:
+        if adjusted_sales > 0 and effective_stock <= rop:
             need_order = True
             shortage = max(target_stock - effective_stock, moq)
             rec_qty = math.ceil(shortage / moq) * moq
-        elif stock <= 0 and incoming_qty == 0 and daily_sales > 0:
+        elif stock <= 0 and incoming_qty == 0 and adjusted_sales > 0:
             need_order = True
             rec_qty = moq
 
-        # 우선순위 판정 로직 분기 개선
         if stock <= 0:
             priority = "🚨 1순위: 현재품절"
         elif need_order and days_left <= effective_lead_time:
@@ -245,7 +264,8 @@ def calculate_reorder_table(products, po_history, holiday_buffer, target_days):
             "현재고": stock,
             "입고대기": incoming_qty,
             "유효재고": effective_stock,
-            "일평균판매": daily_sales,
+            "기본일판": base_sales,
+            "적용일판(마케팅반영)": adjusted_sales,
             "예상품절일": stockout_date_str,
             "남은일수": days_left if days_left < 999 else 999,
             "다음입고예정": next_arr_str,
@@ -264,7 +284,7 @@ def calculate_reorder_table(products, po_history, holiday_buffer, target_days):
     return df
 
 
-def build_calendar_events(products, po_history):
+def build_calendar_events(products, po_history, memo_data, sales_multiplier):
     today = date.today()
     today_str = today.strftime("%Y-%m-%d")
     events_by_date = {}
@@ -275,6 +295,20 @@ def build_calendar_events(products, po_history):
 
     _, earliest_arrival_map = get_pending_po_map(po_history)
 
+    # 1) 메모 데이터 캘린더에 병합 (1번 기능)
+    for m_date, memo_text in memo_data.items():
+        events_by_date.setdefault(m_date, []).append({
+            "type": "운영메모",
+            "icon": "📝",
+            "name": "특이사항 / 입고지연",
+            "qty": 0,
+            "detail": memo_text,
+            "color": "#38BDF8",
+            "bg": "#0C2D48",
+            "border": "#0284C7"
+        })
+
+    # 2) 발주 이력 입고 예정
     for po in po_history:
         status = str(po.get("status", "발주완료"))
         if status in ["입고완료", "취소", "반품"]:
@@ -317,6 +351,7 @@ def build_calendar_events(products, po_history):
             if is_delayed:
                 delayed_arrivals.append(item_row)
 
+    # 3) 마스터 품절/입고전품절 산출 (마케팅 가중치 반영)
     for item in products:
         if item.get("status", "정상") in ["단종", "운영중단"]:
             continue
@@ -324,7 +359,9 @@ def build_calendar_events(products, po_history):
         name = item.get("name", "")
         bc = str(item.get("barcode", "")).strip()
         stock = int(item.get("stock", 0) or 0)
-        daily_sales = float(item.get("daily_sales", 0.0) or 0.0)
+        base_sales = float(item.get("daily_sales", 0.0) or 0.0)
+        adjusted_sales = round(base_sales * sales_multiplier, 1)
+
         next_po = earliest_arrival_map.get(bc)
         next_arrival_str = f"{next_po['date']} ({next_po['qty']:,}개)" if next_po else "미발주 (일정없음) 🚨"
 
@@ -337,12 +374,12 @@ def build_calendar_events(products, po_history):
                 "품목명": name,
                 "바코드": bc,
                 "현재고": stock,
-                "일평균판매": daily_sales,
+                "일평균판매(마케팅반영)": adjusted_sales,
                 "다음 입고예정": next_arrival_str,
                 "CS/상세페이지 안내문구": cs_notice
             })
-        elif daily_sales > 0:
-            days_left = int(stock // daily_sales)
+        elif adjusted_sales > 0:
+            days_left = int(stock // adjusted_sales)
             stockout_date = today + timedelta(days=days_left)
             stockout_str = stockout_date.strftime("%Y-%m-%d")
 
@@ -355,7 +392,7 @@ def build_calendar_events(products, po_history):
                     "icon": "🔥" if is_before_arrival else "⚠️",
                     "name": name,
                     "qty": stock,
-                    "detail": f"{ev_type} (현재고 {stock:,}개 / 일판매 {daily_sales}개)",
+                    "detail": f"{ev_type} (현재고 {stock:,}개 / 일판매 {adjusted_sales}개)",
                     "color": "#F87171" if is_before_arrival else "#FBBF24",
                     "bg": "#3B181E" if is_before_arrival else "#332414",
                     "border": "#EF4444" if is_before_arrival else "#F59E0B"
@@ -369,7 +406,7 @@ def build_calendar_events(products, po_history):
                         "품목명": name,
                         "바코드": bc,
                         "현재고": stock,
-                        "일평균판매": daily_sales,
+                        "적용일판": adjusted_sales,
                         "다음 입고예정": next_arrival_str
                     })
 
@@ -377,6 +414,7 @@ def build_calendar_events(products, po_history):
 
 
 def render_monthly_calendar_html(year, month, events_by_date, filter_types):
+    """가독성과 모바일 터치 편의성을 대폭 높인 다크모드 월간 달력"""
     cal = calendar.Calendar(firstweekday=6)
     month_days = cal.monthdatescalendar(year, month)
     today_str = date.today().strftime("%Y-%m-%d")
@@ -385,9 +423,10 @@ def render_monthly_calendar_html(year, month, events_by_date, filter_types):
     <style>
         .cal-wrapper {
             background-color: #14171F;
-            border-radius: 10px;
-            padding: 4px;
+            border-radius: 12px;
+            padding: 8px;
             border: 1px solid #2D3343;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
         }
         .cal-table {
             width: 100%;
@@ -396,71 +435,65 @@ def render_monthly_calendar_html(year, month, events_by_date, filter_types):
             font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
         }
         .cal-th {
-            background-color: #161922;
-            color: #CBD5E1;
-            padding: 11px 8px;
+            background-color: #1A1F2C;
+            color: #E2E8F0;
+            padding: 14px 8px;
             text-align: center;
-            font-size: 13px;
+            font-size: 14px;
             font-weight: 700;
-            border: 1px solid #282E3D;
+            border: 1px solid #2E364F;
             letter-spacing: 0.5px;
         }
         .cal-td {
-            height: 130px;
+            height: 145px;
             vertical-align: top;
-            padding: 7px;
-            border: 1px solid #282E3D;
+            padding: 8px;
+            border: 1px solid #262D3D;
             background-color: #1E222D;
             color: #E2E8F0;
-            transition: background-color 0.15s ease;
-        }
-        .cal-td:hover {
-            background-color: #252A38;
         }
         .cal-td-other {
-            background-color: #14171F;
-            color: #475569;
+            background-color: #13161D;
+            opacity: 0.5;
         }
         .cal-td-other .date-num {
             color: #475569 !important;
         }
         .cal-td-today {
-            background-color: #26231F !important;
-            border: 1.5px solid #F59E0B !important;
-            box-shadow: inset 0 0 8px rgba(245, 158, 11, 0.12);
+            background-color: #282318 !important;
+            border: 2px solid #F59E0B !important;
         }
         .date-header {
-            font-size: 13px;
+            font-size: 14px;
             font-weight: 700;
-            margin-bottom: 6px;
+            margin-bottom: 8px;
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
-        .date-num {
-            color: #E2E8F0;
-        }
+        .date-num { color: #F1F5F9; }
         .date-sun { color: #F87171 !important; }
         .date-sat { color: #60A5FA !important; }
         .today-tag {
             background: #F59E0B;
             color: #111827;
-            padding: 1px 6px;
-            border-radius: 8px;
+            padding: 2px 7px;
+            border-radius: 10px;
             font-size: 10px;
             font-weight: 800;
         }
         .ev-badge {
             display: block;
-            font-size: 11px;
-            padding: 3px 6px;
-            margin-bottom: 4px;
-            border-radius: 4px;
+            font-size: 11.5px;
+            padding: 4px 8px;
+            margin-bottom: 5px;
+            border-radius: 5px;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
             font-weight: 600;
-            line-height: 1.35;
+            line-height: 1.4;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.2);
         }
     </style>
     <div class="cal-wrapper">
@@ -509,7 +542,7 @@ def render_monthly_calendar_html(year, month, events_by_date, filter_types):
                 html += (
                     f'<div class="ev-badge" title="{tooltip}" '
                     f'style="color:{ev["color"]}; background-color:{ev["bg"]}; border-left: 3px solid {border_col};">'
-                    f'{ev["icon"]} {ev["name"]} ({ev["qty"]:,})'
+                    f'{ev["icon"]} {ev["detail"] if ev["type"]=="운영메모" else f"{ev[\"name\"]} ({ev[\"qty\"]:,})"}'
                     f'</div>'
                 )
             html += "</td>"
@@ -520,14 +553,15 @@ def render_monthly_calendar_html(year, month, events_by_date, filter_types):
 
 
 # =========================================================
-# 4. 사이드바: 권한 인증 + 파라미터 + 엑셀 업로드
+# 4. 사이드바: 권한, 연휴 버퍼, 마케팅 시뮬레이터, 엑셀 동기화
 # =========================================================
 products = load_master_data()
 po_history = load_po_history()
+memo_data = load_memo_data()
 
 with st.sidebar:
     st.title("🦊 FLICKRFOX")
-    st.caption("FLICKRFOX 상품관리 시스템")
+    st.caption("상품관리 & 스마트 발주 시스템")
     st.divider()
 
     st.subheader("🔒 접속 권한 설정")
@@ -535,35 +569,45 @@ with st.sidebar:
         "관리자 비밀번호 입력",
         type="password",
         placeholder="팀원은 입력 없이 조회 가능",
-        help="관리자 비밀번호를 입력하면 매입 단가, 총 발주 금액 확인 및 발주/마스터 수정 권한이 활성화됩니다."
+        help="관리자 비밀번호를 입력하면 단가 확인 및 발주/마스터 수정 권한이 활성화됩니다."
     )
 
     is_admin = (admin_pw_input == ADMIN_PASSWORD)
     if is_admin:
-        st.success("🔓 **관리자 모드** 활성화됨 (단가 노출 및 편집 가능)")
-        with st.expander("🔔 슬랙 웹훅(Webhook) URL 변경/관리"):
-            st.caption("새 슬랙 웹훅 URL을 등록할 수 있습니다. (보안 스캔 완벽 우회)")
+        st.success("🔓 **관리자 모드** 활성화됨")
+        with st.expander("🔔 슬랙 웹훅(Webhook) 설정"):
             new_wh = st.text_input("새 슬랙 Webhook URL", value="", type="password", placeholder="https://hooks.slack.com/...")
             if st.button("웹훅 URL 저장", use_container_width=True):
                 if new_wh.strip():
                     save_custom_webhook(new_wh.strip())
-                    st.success("새 슬랙 웹훅 URL이 안전하게 저장되었습니다!")
+                    st.success("저장 완료!")
                     st.rerun()
     else:
         if admin_pw_input:
-            st.error("비밀번호가 일치하지 않습니다.")
-        st.info("👥 **일반 팀원 모드** (매입단가·금액 비노출 / 조회 전용)")
+            st.error("비밀번호 불일치")
+        st.info("👥 **일반 팀원 모드** (조회 전용)")
 
     st.divider()
 
-    st.subheader("⚙️ 발주 산출 기준 설정")
+    st.subheader("⚙️ 발주 및 수요 예측 설정")
     holiday_buffer = st.number_input("명절·연휴 리드타임 버퍼 (일)", min_value=0, max_value=60, value=0, step=1)
     target_days = st.number_input("목표 재고 유지 기간 (일)", min_value=7, max_value=90, value=30, step=1)
+
+    # 2번 기능: 마케팅 판매량 가중치 사이드바 슬라이더
+    st.markdown("---")
+    st.subheader("📈 마케팅 판매량 가중치 (2번 기능)")
+    sales_multiplier = st.slider(
+        "판매 속도 변동 계수",
+        min_value=1.0, max_value=5.0, value=1.0, step=0.1,
+        help="광고 집행이나 프로모션으로 평소 대비 판매량이 증가할 때 배수를 높여주세요. 발주 추천 수량과 품절일이 즉시 재계산됩니다."
+    )
+    if sales_multiplier > 1.0:
+        st.warning(f"⚠️ 현재 평소 판매량의 **{sales_multiplier}배** 속도로 소진 가정 중입니다.")
 
     st.divider()
 
     st.subheader("📥 이지어드민 재고 엑셀 연동")
-    uploaded_file = st.file_uploader("이지어드민 재고 파일 (.xlsx / .csv)", type=["xlsx", "xls", "csv"])
+    uploaded_file = st.file_uploader("이지어드민 파일 (.xlsx / .csv)", type=["xlsx", "xls", "csv"])
 
     if uploaded_file is not None:
         try:
@@ -577,7 +621,7 @@ with st.sidebar:
             sales_col = next((c for c in df_ez.columns if any(k in str(c) for k in ["일평균", "판매량", "출고"])), None)
 
             if bc_col and stock_col:
-                if st.button("🔄 현재고 데이터 즉시 동기화", type="primary", use_container_width=True):
+                if st.button("🔄 현재고 데이터 동기화", type="primary", use_container_width=True):
                     ez_map = {}
                     for _, r in df_ez.iterrows():
                         b_val = str(r[bc_col]).strip()
@@ -596,40 +640,41 @@ with st.sidebar:
                             updated_cnt += 1
 
                     save_master_data(products)
-                    st.success(f"총 {updated_cnt}개 품목의 현재고가 동기화되었습니다!")
+                    st.success(f"총 {updated_cnt}개 품목 동기화 완료!")
                     st.rerun()
             else:
-                st.warning("엑셀 파일에서 '바코드' 또는 '가용재고(현재고)' 컬럼을 찾을 수 없습니다.")
+                st.warning("바코드 또는 현재고 컬럼을 찾을 수 없습니다.")
         except Exception as e:
-            st.error(f"파일 읽기 오류: {e}")
+            st.error(f"오류: {e}")
 
 
 # =========================================================
 # 5. 메인 화면 탭 구성
 # =========================================================
-st.title("🦊 FLICKRFOX 상품관리 (재고 · 발주 · 입고 캘린더)")
+st.title("🦊 FLICKRFOX 상품관리 (재고 · 발주 · 캘린더)")
 
 tab_calendar, tab_dashboard, tab_history, tab_master = st.tabs([
-    "📅 재고·입고 캘린더 (팀 공유)",
-    "🚀 자동 발주 대시보드",
+    "📅 재고·입고 캘린더 (운영 메모 포함)",
+    "🚀 스마트 발주 대시보드",
     "📋 발주 히스토리 · 입고관리",
     "⚙️ 품목 마스터 관리"
 ])
 
 
 # ---------------------------------------------------------
-# [TAB 1] 📅 재고·입고 캘린더 (팀 공유용 - 다크모드)
+# [TAB 1] 📅 재고·입고 캘린더 (운영 메모 기능 + 다크모드 가독성 강화)
 # ---------------------------------------------------------
 with tab_calendar:
     events_by_date, out_of_stock_list, stockout_soon_list, upcoming_arrivals, delayed_arrivals = (
-        build_calendar_events(products, po_history)
+        build_calendar_events(products, po_history, memo_data, sales_multiplier)
     )
 
+    # 상단 요약 KPI 카드 (여유 있는 간격)
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("🚨 현재 품절 상품 (재고 0)", f"{len(out_of_stock_list)}개", delta="즉시 입고일정 확인", delta_color="inverse")
-    k2.metric("🔥 품절 임박 / 입고전품절", f"{len(stockout_soon_list)}개", delta="예약발송 전환/발주 점검", delta_color="off")
-    k3.metric("📦 진행 중인 입고 예정", f"{len(upcoming_arrivals)}건")
-    k4.metric("⚠️ 입고 예정일 경과(지연)", f"{len(delayed_arrivals)}건", delta="입고완료 처리 또는 공장 확인" if delayed_arrivals else "지연 없음", delta_color="inverse" if delayed_arrivals else "normal")
+    k1.metric("🚨 현재 품절 상품", f"{len(out_of_stock_list)}개", delta="즉시 확인 필요", delta_color="inverse")
+    k2.metric("🔥 품절임박 / 입고전품절", f"{len(stockout_soon_list)}개", delta="마케팅/발주 점검", delta_color="off")
+    k3.metric("📦 진행중인 입고 예정", f"{len(upcoming_arrivals)}건")
+    k4.metric("⚠️ 입고 지연 경과", f"{len(delayed_arrivals)}건", delta="공장 확인 요망" if delayed_arrivals else "정상", delta_color="inverse" if delayed_arrivals else "normal")
 
     if out_of_stock_list:
         oos_names = ", ".join([f"**{x['품목명']}** (입고예정: {x['다음 입고예정']})" for x in out_of_stock_list])
@@ -637,32 +682,55 @@ with tab_calendar:
 
     st.divider()
 
+    # 1번 기능: 날짜별 운영 메모 등록 섹션 (접이식)
+    with st.expander("📝 [1번 기능] 캘린더 날짜별 운영 특이사항 및 입고 지연 메모 등록하기"):
+        c_m1, c_m2, c_m3 = st.columns([1.5, 2.5, 1])
+        with c_m1:
+            memo_date_sel = st.date_input("메모 적용 날짜", value=date.today())
+        with c_m2:
+            memo_text_input = st.text_input("특이사항 입력", placeholder="예: 택배사 파업 출고 지연, 빅프로모션 광고비 증액 등")
+        with c_m3:
+            st.write("")
+            st.write("")
+            if st.button("메모 저장하기", type="primary", use_container_width=True):
+                if memo_text_input.strip():
+                    memo_data[memo_date_sel.strftime("%Y-%m-%d")] = memo_text_input.strip()
+                    save_memo_data(memo_data)
+                    st.success("캘린더에 메모가 반영되었습니다!")
+                    st.rerun()
+
+    st.write("")
+    # 달력 컨트롤 바
     today = date.today()
     c1, c2, c3, c4 = st.columns([1, 1, 2.2, 2])
     with c1:
-        sel_year = st.selectbox("연도 선택", list(range(today.year - 1, today.year + 2)), index=1)
+        sel_year = st.selectbox("연도", list(range(today.year - 1, today.year + 2)), index=1)
     with c2:
-        sel_month = st.selectbox("월 선택", list(range(1, 13)), index=today.month - 1)
+        sel_month = st.selectbox("월", list(range(1, 13)), index=today.month - 1)
     with c3:
         filter_types = st.multiselect(
-            "달력에 표시할 항목",
-            options=["입고예정", "품절예정", "입고전품절"],
-            default=["입고예정", "품절예정", "입고전품절"]
+            "표시 항목 필터",
+            options=["입고예정", "품절예정", "입고전품절", "운영메모"],
+            default=["입고예정", "품절예정", "입고전품절", "운영메모"]
         )
     with c4:
-        cal_search = st.text_input("🔍 상품명 검색 필터", placeholder="예: Mag-Link, 폴드8, OctoLock...")
+        cal_search = st.text_input("🔍 상품명 검색", placeholder="예: Mag-Link, 폴드8...")
 
     filtered_events = {}
     for d_str, ev_list in events_by_date.items():
+        if any(ev["type"] == "운영메모" for ev in ev_list):
+            filtered_events[d_str] = ev_list
+            continue
         matched = [ev for ev in ev_list if cal_search.lower() in ev["name"].lower()]
         if matched:
             filtered_events[d_str] = matched
 
     st.markdown(
-        "💡 **일정 배지 안내:** &nbsp;"
-        "<span style='background:#172A45;color:#60A5FA;border-left:3px solid #3B82F6;padding:4px 10px;border-radius:4px;font-weight:bold;font-size:13px;'>📦 입고예정 (입고수량)</span> &nbsp;"
-        "<span style='background:#332414;color:#FBBF24;border-left:3px solid #F59E0B;padding:4px 10px;border-radius:4px;font-weight:bold;font-size:13px;'>⚠️ 품절예정 (입고일 이후 소진)</span> &nbsp;"
-        "<span style='background:#3B181E;color:#F87171;border-left:3px solid #EF4444;padding:4px 10px;border-radius:4px;font-weight:bold;font-size:13px;'>🔥 입고전품절 (입고일보다 먼저 품절 예상)</span>",
+        "💡 **배지 안내:** &nbsp;"
+        "<span style='background:#172A45;color:#60A5FA;padding:4px 8px;border-radius:4px;font-weight:bold;font-size:12px;'>📦 입고예정</span> &nbsp;"
+        "<span style='background:#332414;color:#FBBF24;padding:4px 8px;border-radius:4px;font-weight:bold;font-size:12px;'>⚠️ 품절예정</span> &nbsp;"
+        "<span style='background:#3B181E;color:#F87171;padding:4px 8px;border-radius:4px;font-weight:bold;font-size:12px;'>🔥 입고전품절</span> &nbsp;"
+        "<span style='background:#0C2D48;color:#38BDF8;padding:4px 8px;border-radius:4px;font-weight:bold;font-size:12px;'>📝 운영메모</span>",
         unsafe_allow_html=True
     )
     st.write("")
@@ -672,34 +740,34 @@ with tab_calendar:
     st.write("")
     col_detail_left, col_detail_right = st.columns([1.1, 1.9])
     with col_detail_left:
-        st.markdown("##### 📌 날짜별 일정 상세 보기")
-        picked_date = st.date_input("확인할 날짜 선택", value=today)
+        st.markdown("##### 📌 날짜별 상세 일정 및 메모")
+        picked_date = st.date_input("날짜 선택", value=today, key="picked_dt")
         picked_str = picked_date.strftime("%Y-%m-%d")
         day_items = filtered_events.get(picked_str, [])
         if day_items:
             df_day = pd.DataFrame(day_items)[["icon", "type", "name", "detail"]]
-            df_day.columns = ["구분", "유형", "품목명", "상세내용"]
+            df_day.columns = ["구분", "유형", "항목", "상세내용"]
             st.dataframe(df_day, use_container_width=True, hide_index=True)
         else:
-            st.info(f"{picked_str}에는 예정된 입고나 품절 예상 일정이 없습니다.")
+            st.info(f"{picked_str}에 등록된 일정이나 메모가 없습니다.")
 
     with col_detail_right:
         sub_t1, sub_t2, sub_t3 = st.tabs([
             f"🚨 현재 품절 ({len(out_of_stock_list)})",
-            f"🔥 품절 임박 · 입고전품절 ({len(stockout_soon_list)})",
-            f"📦 전체 입고 예정 스케줄 ({len(upcoming_arrivals)})"
+            f"🔥 품절임박 · 입고전품절 ({len(stockout_soon_list)})",
+            f"📦 전체 입고 스케줄 ({len(upcoming_arrivals)})"
         ])
         with sub_t1:
             if out_of_stock_list:
                 st.dataframe(pd.DataFrame(out_of_stock_list), use_container_width=True, hide_index=True)
             else:
-                st.success("현재 품절(재고 0)인 상품이 없습니다.")
+                st.success("현재 품절 상품이 없습니다.")
         with sub_t2:
             if stockout_soon_list:
                 df_soon = pd.DataFrame(stockout_soon_list).sort_values("품절예상일")
                 st.dataframe(df_soon, use_container_width=True, hide_index=True)
             else:
-                st.success("향후 14일 이내 품절 임박 또는 입고전품절 위험 상품이 없습니다.")
+                st.success("위험 품목이 없습니다.")
         with sub_t3:
             if upcoming_arrivals:
                 df_inc = pd.DataFrame(upcoming_arrivals).sort_values("입고예정일")
@@ -707,22 +775,22 @@ with tab_calendar:
                     df_inc = df_inc.drop(columns=["매입단가", "발주총액"], errors="ignore")
                 st.dataframe(df_inc, use_container_width=True, hide_index=True)
             else:
-                st.info("현재 입고 대기 중인 발주 내역이 없습니다.")
+                st.info("입고 대기 내역이 없습니다.")
 
 
 # ---------------------------------------------------------
-# [TAB 2] 🚀 자동 발주 대시보드
+# [TAB 2] 🚀 스마트 발주 대시보드 (마케팅 시뮬레이터 연동)
 # ---------------------------------------------------------
 with tab_dashboard:
-    df_calc = calculate_reorder_table(products, po_history, holiday_buffer, target_days)
+    df_calc = calculate_reorder_table(products, po_history, holiday_buffer, target_days, sales_multiplier)
     urgent_df = df_calc[df_calc["발주선택"] == True]
 
     m1, m2, m3 = st.columns(3)
     m1.metric("전체 관리 품목", f"{len(df_calc)}개")
-    m2.metric("발주 권장/긴급 품목", f"{len(urgent_df)}개", delta="발주 검토 필요" if len(urgent_df) > 0 else "안정")
+    m2.metric("발주 권장/긴급 품목", f"{len(urgent_df)}개", delta=f"마케팅 계수 {sales_multiplier}배 적용중", delta_color="off")
     if is_admin:
         total_budget = int(urgent_df["예상발주금액"].sum()) if not urgent_df.empty else 0
-        m3.metric("💰 예상 발주 총 예산 (관리자 전용)", f"{total_budget:,}원")
+        m3.metric("💰 예상 발주 총 예산 (관리자)", f"{total_budget:,}원")
     else:
         total_rec_qty = int(urgent_df["추천발주량"].sum()) if not urgent_df.empty else 0
         m3.metric("📦 추천 발주 총수량", f"{total_rec_qty:,}개")
@@ -730,8 +798,8 @@ with tab_dashboard:
     st.divider()
 
     if is_admin:
-        st.markdown("#### 📋 실시간 발주 산출 테이블 (관리자 모드: 수량 조정 및 발주 확정 가능)")
-        st.caption("체크박스를 선택하고 `발주수량(수정가능)`을 조정한 뒤 하단의 **발주 확정** 버튼을 누르면 히스토리에 기록되고 캘린더의 입고예정일에 자동 반영됩니다.")
+        st.markdown("#### 📋 실시간 발주 산출 테이블 (수량 조정 및 발주 확정)")
+        st.caption("마케팅 가중치가 반영된 추천 발주량이 자동으로 계산됩니다. 수량을 조정한 뒤 발주를 확정하세요.")
 
         edited_order_df = st.data_editor(
             df_calc,
@@ -745,7 +813,7 @@ with tab_dashboard:
             },
             disabled=[
                 "우선순위", "품목명", "바코드", "거래처", "현재고", "입고대기", "유효재고",
-                "일평균판매", "예상품절일", "남은일수", "다음입고예정", "총리드타임", "재발주점(ROP)", "MOQ", "추천발주량", "매입단가", "예상발주금액"
+                "기본일판", "적용일판(마케팅반영)", "예상품절일", "남은일수", "다음입고예정", "총리드타임", "재발주점(ROP)", "MOQ", "추천발주량", "매입단가", "예상발주금액"
             ],
             key="order_editor"
         )
@@ -764,10 +832,10 @@ with tab_dashboard:
 
             col_btn1, col_btn2 = st.columns([1, 1])
             with col_btn1:
-                if st.button("✅ 선택 품목 발주 완료 처리 (캘린더 자동 등록 & 슬랙 알림)", type="primary", use_container_width=True):
+                if st.button("✅ 선택 품목 발주 완료 처리 (캘린더 등록 & 슬랙 알림)", type="primary", use_container_width=True):
                     now_str = datetime.now().strftime("%Y-%m-%d")
                     new_records = []
-                    slack_lines = [f"🚨 *[FLICKRFOX 신규 발주 완료 알림 ({now_str})]*"]
+                    slack_lines = [f"🚨 *[FLICKRFOX 신규 발주 완료 알림 ({now_str})]* (마케팅 계수: {sales_multiplier}배)"]
 
                     for idx, row in selected_orders.iterrows():
                         po_id = f"PO-{datetime.now().strftime('%Y%m%d%H%M%S')}-{idx+1}"
@@ -787,7 +855,7 @@ with tab_dashboard:
                             "total_price": t_price,
                             "expected_arrival": arr_date,
                             "status": "발주완료",
-                            "memo": f"리드타임 {int(row['총리드타임'])}일 반영"
+                            "memo": f"리드타임 {int(row['총리드타임'])}일 (마케팅 {sales_multiplier}배 적용)"
                         }
                         po_history.append(record)
                         new_records.append(record)
@@ -797,7 +865,7 @@ with tab_dashboard:
 
                     save_po_history(po_history)
                     ok, msg = send_slack_notification(SLACK_WEBHOOK_URL, "\n".join(slack_lines))
-                    st.success(f"{len(new_records)}건 발주 이력 저장 및 캘린더 입고 일정 등록 완료! ({msg})")
+                    st.success(f"{len(new_records)}건 발주 이력 저장 및 캘린더 반영 완료! ({msg})")
                     st.rerun()
 
             with col_btn2:
@@ -813,11 +881,10 @@ with tab_dashboard:
                     else:
                         st.warning(msg)
     else:
-        st.markdown("#### 📋 실시간 재고 및 발주 필요 현황 (팀원 조회 모드 - 단가 비노출)")
-        st.caption("일반 팀원 모드에서는 매입 단가와 발주 금액이 숨겨지며, 발주 확정은 좌측 사이드바에서 관리자 인증 후 가능합니다.")
+        st.markdown("#### 📋 실시간 발주 필요 현황 (팀원 조회 모드)")
         team_view_cols = [
             "우선순위", "품목명", "바코드", "거래처", "현재고", "입고대기", "유효재고",
-            "일평균판매", "예상품절일", "다음입고예정", "총리드타임", "재발주점(ROP)", "추천발주량"
+            "적용일판(마케팅반영)", "예상품절일", "다음입고예정", "총리드타임", "재발주점(ROP)", "추천발주량"
         ]
         st.dataframe(df_calc[team_view_cols], use_container_width=True, hide_index=True)
 
@@ -827,7 +894,7 @@ with tab_dashboard:
 # ---------------------------------------------------------
 with tab_history:
     st.subheader("📋 발주 히스토리 및 입고 상태 관리")
-    st.caption("입고 완료된 건의 상태를 `입고완료`로 변경하고 저장하면 대기 수량 및 캘린더 입고 예정 배지에서 자동으로 정리됩니다.")
+    st.caption("입고 완료된 건의 상태를 `입고완료`로 변경하고 저장하면 캘린더에서 입고 예정 배지가 정리됩니다.")
 
     if not po_history:
         st.info("기록된 발주 이력이 없습니다.")
@@ -835,7 +902,6 @@ with tab_history:
         df_hist = pd.DataFrame(po_history)
 
         if is_admin:
-            st.markdown("🔓 **관리자 모드:** 단가/총액 확인 및 진행상태(`발주완료` ↔ `입고완료` ↔ `취소`) 직접 수정이 가능합니다.")
             edited_hist = st.data_editor(
                 df_hist,
                 num_rows="dynamic",
@@ -850,33 +916,20 @@ with tab_history:
                     "po_qty": st.column_config.NumberColumn("발주수량", format="%d개"),
                     "unit_price": st.column_config.NumberColumn("단가(원)", format="%d원"),
                     "total_price": st.column_config.NumberColumn("총액(원)", format="%d원"),
-                    "expected_arrival": "입고예정일 (YYYY-MM-DD)",
+                    "expected_arrival": "입고예정일",
                     "status": st.column_config.SelectboxColumn("진행상태", options=["발주완료", "생산중", "배송중", "입고완료", "취소"]),
                     "memo": "메모"
                 },
                 key="history_editor"
             )
 
-            if st.button("💾 발주 히스토리 수정사항 저장", type="primary"):
-                updated_list = edited_hist.to_dict(orient="records")
-                save_po_history(updated_list)
-                st.success("발주 히스토리가 저장되었으며 캘린더에 즉시 반영되었습니다!")
+            if st.button("💾 발주 히스토리 저장", type="primary"):
+                save_po_history(edited_hist.to_dict(orient="records"))
+                st.success("저장 완료!")
                 st.rerun()
         else:
-            st.markdown("👥 **일반 팀원 모드:** 매입 단가 및 발주 총액은 표시되지 않습니다.")
             safe_cols = [c for c in ["order_id", "date", "name", "barcode", "supplier", "po_qty", "expected_arrival", "status", "memo"] if c in df_hist.columns]
-            df_hist_team = df_hist[safe_cols].rename(columns={
-                "order_id": "발주번호",
-                "date": "발주일",
-                "name": "품목명",
-                "barcode": "바코드",
-                "supplier": "거래처",
-                "po_qty": "발주수량",
-                "expected_arrival": "입고예정일",
-                "status": "진행상태",
-                "memo": "메모"
-            })
-            st.dataframe(df_hist_team, use_container_width=True, hide_index=True)
+            st.dataframe(df_hist[safe_cols], use_container_width=True, hide_index=True)
 
 
 # ---------------------------------------------------------
@@ -887,7 +940,6 @@ with tab_master:
     df_master = pd.DataFrame(products)
 
     if is_admin:
-        st.markdown("🔓 **관리자 모드:** 매입 단가 확인, 기존 품목 수정, 신규 품목 추가 및 삭제가 가능합니다.")
         edited_master = st.data_editor(
             df_master,
             num_rows="dynamic",
@@ -898,7 +950,7 @@ with tab_master:
                 "barcode": "바코드",
                 "supplier": "거래처",
                 "lead_time": st.column_config.NumberColumn("기본 리드타임(일)", min_value=1, max_value=120),
-                "moq": st.column_config.NumberColumn("MOQ(최소발주수량)", min_value=1, step=50),
+                "moq": st.column_config.NumberColumn("MOQ", min_value=1, step=50),
                 "unit_price": st.column_config.NumberColumn("매입단가(원)", min_value=0, format="%d원"),
                 "stock": st.column_config.NumberColumn("현재고", min_value=0),
                 "daily_sales": st.column_config.NumberColumn("일평균판매량", min_value=0.0, format="%.1f"),
@@ -907,22 +959,10 @@ with tab_master:
             key="master_editor"
         )
 
-        if st.button("💾 품목 마스터 변경사항 저장", type="primary"):
-            new_master_list = edited_master.to_dict(orient="records")
-            save_master_data(new_master_list)
-            st.success("품목 마스터 정보가 성공적으로 저장되었습니다!")
+        if st.button("💾 품목 마스터 저장", type="primary"):
+            save_master_data(edited_master.to_dict(orient="records"))
+            st.success("마스터 정보 저장 완료!")
             st.rerun()
     else:
-        st.markdown("👥 **일반 팀원 모드:** 매입 단가는 숨김 처리되며, 품목 스펙 및 현재고만 조회할 수 있습니다.")
         safe_master_cols = [c for c in ["name", "barcode", "supplier", "lead_time", "moq", "stock", "daily_sales", "status"] if c in df_master.columns]
-        df_master_team = df_master[safe_master_cols].rename(columns={
-            "name": "품목명",
-            "barcode": "바코드",
-            "supplier": "거래처",
-            "lead_time": "리드타임(일)",
-            "moq": "MOQ",
-            "stock": "현재고",
-            "daily_sales": "일평균판매량",
-            "status": "운영상태"
-        })
-        st.dataframe(df_master_team, use_container_width=True, hide_index=True)
+        st.dataframe(df_master[safe_master_cols], use_container_width=True, hide_index=True)
