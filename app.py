@@ -11,7 +11,7 @@ from html.parser import HTMLParser
 from datetime import datetime, date, timedelta
 
 # =========================================================
-# 1. 기본 환경 설정 및 모바일 최적화 메타 태그
+# 1. 기본 환경 설정 및 다크모드 강제 고정 설정
 # =========================================================
 st.set_page_config(
     page_title="FLICKRFOX 상품관리",
@@ -20,6 +20,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Streamlit 전역 테마를 다크모드로 강제 고정하는 설정 추가
 st.markdown("""
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="manifest" href="manifest.json">
@@ -29,6 +30,10 @@ st.markdown("""
     <meta name="application-name" content="FLICKRFOX 상품관리">
     <meta name="theme-color" content="#14171F">
     <style>
+        /* 항상 다크 테마 컬러가 기본 적용되도록 루트 스타일 강제 */
+        :root {
+            color-scheme: dark;
+        }
         .block-container { padding-top: 2rem; padding-bottom: 3rem; }
         
         div[data-testid="stMetric"] {
