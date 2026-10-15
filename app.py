@@ -29,7 +29,6 @@ st.markdown("""
     <style>
         .block-container { padding-top: 2rem; padding-bottom: 3rem; }
         
-        /* 상단 KPI 카드 가독성 대폭 확대 */
         div[data-testid="stMetric"] {
             background-color: #1E222D;
             border: 1px solid #2D3343;
@@ -40,7 +39,6 @@ st.markdown("""
         div[data-testid="stMetricLabel"] { font-size: 1.05rem !important; font-weight: 700 !important; color: #94A3B8 !important; }
         div[data-testid="stMetricValue"] { font-size: 2.1rem !important; font-weight: 800 !important; color: #F8FAFC !important; }
         
-        /* 개별 긴급 품절 카드 스타일 */
         .oos-card {
             background-color: #1E222D;
             border: 1.5px solid #EF4444;
@@ -74,7 +72,6 @@ HISTORY_FILE = "po_history.json"
 MEMO_FILE = "calendar_memos.json"
 CONFIG_FILE = "local_config.json"
 
-# 관리자 비밀번호 고정
 ADMIN_PASSWORD = "fox1989@@"
 
 def get_slack_webhook_url():
@@ -138,7 +135,7 @@ DEFAULT_PRODUCTS = [
 
 
 # =========================================================
-# 2. 데이터 입출력 함수
+# 2. 데이터 입출력 함수 (자동 생성 안전장치 포함)
 # =========================================================
 def load_master_data():
     if os.path.exists(MASTER_FILE):
@@ -163,6 +160,7 @@ def load_po_history():
                 return json.load(f)
         except Exception:
             return []
+    save_po_history([])
     return []
 
 def save_po_history(history):
@@ -176,6 +174,7 @@ def load_memo_data():
                 return json.load(f)
         except Exception:
             return {}
+    save_memo_data({})
     return {}
 
 def save_memo_data(memos):
@@ -184,7 +183,7 @@ def save_memo_data(memos):
 
 def send_slack_notification(webhook_url, message_text):
     if not webhook_url:
-        return False, "슬랙 웹훅 URL이 설정되지 않았습니다."
+        return False, "슬랙 Webhook URL이 설정되지 않았습니다."
     try:
         resp = requests.post(
             webhook_url,
@@ -640,10 +639,8 @@ with st.sidebar:
             if file_name.endswith(".csv"):
                 df_ez = pd.read_csv(uploaded_file)
             elif file_name.endswith(".xls"):
-                # 구버전 .xls 파일은 xlrd 엔진 지정
                 df_ez = pd.read_excel(uploaded_file, engine="xlrd")
             else:
-                # .xlsx 파일은 openpyxl 엔진 지정
                 df_ez = pd.read_excel(uploaded_file, engine="openpyxl")
 
             bc_col = next((c for c in df_ez.columns if "바코드" in str(c) or "barcode" in str(c).lower()), None)
@@ -701,7 +698,6 @@ with tab_calendar:
         build_calendar_events(products, po_history, memo_data, sales_multiplier)
     )
 
-    # 상단 4대 요약 KPI 카드
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("🚨 현재 품절 상품", f"{len(out_of_stock_list)}개", delta="즉시 확인 필요", delta_color="inverse")
     k2.metric("🔥 품절임박 / 입고전품절", f"{len(stockout_soon_list)}개", delta="마케팅/발주 점검", delta_color="off")
@@ -710,7 +706,6 @@ with tab_calendar:
 
     st.write("")
 
-    # 품절 상품별 개별 카드 반복 생성
     if out_of_stock_list:
         st.markdown("### 🚨 현재 품절 중인 상품 긴급 안내")
         for oos in out_of_stock_list:
