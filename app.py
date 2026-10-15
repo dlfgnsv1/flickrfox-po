@@ -5,32 +5,62 @@ import json
 import os
 import math
 import calendar
+import base64
 import requests
+from PIL import Image
 from datetime import datetime, date, timedelta
 
 # =========================================================
-# 1. 기본 환경 설정 및 모바일 최적화 메타 태그
+# 1. 기본 환경 설정 및 여우 아이콘(파비콘/모바일/바탕화면) 강제 적용
 # =========================================================
+ICON_PATH = "fox.png"
+page_icon_obj = Image.open(ICON_PATH) if os.path.exists(ICON_PATH) else "🦊"
+
 st.set_page_config(
     page_title="FLICKRFOX 상품관리",
-    page_icon="fox.png",
+    page_icon=page_icon_obj,
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-st.markdown("""
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="manifest" href="manifest.json">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="FLICKRFOX 상품관리">
-    <meta name="application-name" content="FLICKRFOX 상품관리">
-    <meta name="theme-color" content="#14171F">
-    <style>
-        .block-container { padding-top: 2rem; padding-bottom: 3rem; }
-        div[data-testid="stMetricValue"] { font-size: 1.6rem !important; }
-    </style>
-""", unsafe_allow_html=True)
+def inject_custom_app_icon_and_title(img_path, app_title="FLICKRFOX 상품관리"):
+    """
+    Streamlit의 기본 빨간 왕관 아이콘과 '- Streamlit' 꼬리표를 제거하고
+    PC 크롬 바로가기 및 모바일 홈 화면 아이콘을 fox.png로 강제 교체합니다.
+    """
+    if not os.path.exists(img_path):
+        return
+    with open(img_path, "rb") as f:
+        b64_icon = base64.b64encode(f.read()).decode("utf-8")
+
+    st.markdown(f"""
+        <style>
+            .block-container {{ padding-top: 2rem; padding-bottom: 3rem; }}
+            div[data-testid="stMetricValue"] {{ font-size: 1.6rem !important; }}
+        </style>
+        <script>
+            (function() {{
+                const iconData = "data:image/png;base64,{b64_icon}";
+                const targetTitle = "{app_title}";
+                function applyCustomMeta() {{
+                    const doc = window.parent.document;
+                    if (doc.title !== targetTitle) {{
+                        doc.title = targetTitle;
+                    }}
+                    const links = doc.querySelectorAll("link[rel*='icon'], link[rel='apple-touch-icon']");
+                    links.forEach(link => {{
+                        if (link.href !== iconData) {{
+                            link.href = iconData;
+                        }}
+                    }});
+                }}
+                applyCustomMeta();
+                setInterval(applyCustomMeta, 1000);
+            }})();
+        </script>
+    """, unsafe_allow_html=True)
+
+inject_custom_app_icon_and_title(ICON_PATH, "FLICKRFOX 상품관리")
 
 MASTER_FILE = "master_products.json"
 HISTORY_FILE = "po_history.json"
