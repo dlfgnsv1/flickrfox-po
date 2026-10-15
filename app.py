@@ -6,6 +6,7 @@ import os
 import math
 import calendar
 import requests
+from html.parser import HTMLParser
 from datetime import datetime, date, timedelta
 
 # =========================================================
@@ -96,8 +97,143 @@ def safe_float(val, default=0.0):
     except Exception:
         return default
 
+
+# =========================================================
+# 1-2. 이지어드민 전용 만능 파일 파서 (.xls / .html / .htm / .csv / .xlsx)
+# =========================================================
+class SimpleHTMLTableParser(HTMLParser):
+    """외부 라이브러리(lxml 등) 없이도 웹페이지(.html/.xls) 표를 완벽히 추출하는 내장 파서"""
+    def __init__(self):
+        super().__init__()
+        self.in_cell = False
+        self.tables = []
+        self.curr_table = []
+        self.curr_row = []
+        self.curr_cell = []
+
+    def handle_starttag(self, tag, attrs):
+        t = tag.lower()
+        if t == "table":
+            self.curr_table = []
+        elif t == "tr":
+            self.curr_row = []
+        elif t in ("td", "th"):
+            self.in_cell = True
+            self.curr_cell = []
+
+    def handle_endtag(self, tag):
+        t = tag.lower()
+        if t in ("td", "th"):
+            if self.in_cell:
+                self.curr_row.append("".join(self.curr_cell).strip())
+                self.in_cell = False
+        elif t == "tr":
+            if self.curr_row:
+                self.curr_table.append(self.curr_row)
+        elif t == "table":
+            if self.curr_table:
+                self.tables.append(self.curr_table)
+
+    def handle_data(self, data):
+        if self.in_cell:
+            self.curr_cell.append(data)
+
+
+def normalize_Header_df(df):
+    """표 상단에 불필요한 줄이 있을 경우 '바코드'나 '상품명'이 있는 줄을 찾아 컬럼명으로 자동 승격"""
+    df = df.dropna(how="all").reset_index(drop=True)
+    if df.empty:
+        return df
+
+    col_str = " ".join(str(c) for c in df.columns)
+    if any(k in col_str for k in ["바코드", "상품코드", "가용재고", "현재고", "정상재고"]) or "barcode" in col_str.lower():
+        return df
+
+    for idx in range(min(15, len(df))):
+        row_vals = [str(v).strip() for v in df.iloc[idx].values]
+        row_str = " ".join(row_vals)
+        if any(k in row_str for k in ["바코드", "상품코드", "가용재고", "현재고", "정상재고"]) or "barcode" in row_str.lower():
+            new_df = df.iloc[idx + 1:].copy()
+            new_df.columns = [v if v else f"col_{i}" for i, v in enumerate(row_vals)]
+            return new_df.reset_index(drop=True)
+    return df
+
+
+def parse_easyadmin_file(uploaded_file):
+    """이지어드민에서 받은 .xls(실제 HTML 또는 바이너리), .html, .htm, .csv, .xlsx를 모두 판별하여 DataFrame으로 변환"""
+    raw_bytes = uploaded_file.getvalue()
+    fname = uploaded_file.name.lower()
+
+    # 1) 파일 앞부분을 검사해 웹페이지(HTML) 형식인지 자동 확인
+    head_sample = raw_bytes[:2048].lower()
+    is_html_content = (
+        fname.endswith((".html", ".htm"))
+        or b"<html" in head_sample
+        or b"<table" in head_sample
+        or b"<!doctype html" in head_sample
+        or b"<meta" in head_sample
+    )
+
+    # 2) HTML 형식(.html 이거나 HTML로 저장된 .xls) 파싱
+    if is_html_content:
+        text = None
+        for enc in ("utf-8-sig", "utf-8", "cp949", "euc-kr"):
+            try:
+                text = raw_bytes.decode(enc)
+                break
+            except Exception:
+                continue
+        if text is None:
+            text = raw_bytes.decode("utf-8", errors="ignore")
+
+        parser = SimpleHTMLTableParser()
+        parser.feed(text)
+        if parser.tables:
+            best_df = None
+            for tbl in parser.tables:
+                max_cols = max((len(r) for r in tbl), default=0)
+                if max_cols == 0:
+                    continue
+                padded = [r + [""] * (max_cols - len(r)) for r in tbl]
+                temp_df = pd.DataFrame(padded)
+                temp_df = normalize_Header_df(temp_df)
+                col_join = " ".join(str(c) for c in temp_df.columns)
+                if any(k in col_join for k in ["바코드", "가용재고", "현재고", "재고"]):
+                    return temp_df
+                if best_df is None or len(temp_df) > len(best_df):
+                    best_df = temp_df
+            if best_df is not None:
+                return best_df
+
+    # 3) 일반 CSV 파일인 경우
+    if fname.endswith(".csv"):
+        for enc in ("utf-8-sig", "cp949", "euc-kr", "utf-8"):
+            try:
+                uploaded_file.seek(0)
+                return normalize_Header_df(pd.read_csv(uploaded_file, encoding=enc))
+            except Exception:
+                continue
+
+    # 4) 실제 엑셀 바이너리(.xls / .xlsx) 또는 탭 구분 텍스트(.xls)인 경우
+    for eng in ("xlrd", "openpyxl"):
+        try:
+            uploaded_file.seek(0)
+            return normalize_Header_df(pd.read_excel(uploaded_file, engine=eng))
+        except Exception:
+            continue
+
+    # 5) 탭(\t)으로 구분된 텍스트형 .xls 파일인 경우
+    for enc in ("utf-8-sig", "cp949", "euc-kr"):
+        try:
+            uploaded_file.seek(0)
+            return normalize_Header_df(pd.read_csv(uploaded_file, sep="\t", encoding=enc))
+        except Exception:
+            continue
+
+    raise ValueError("파일 형식을 인식할 수 없습니다. 이지어드민 원본 파일(.xls, .html, .csv)인지 확인해 주세요.")
+
+
 def get_slack_webhook_url():
-    # 로컬 설정 파일에 저장된 다중 웹훅이 있으면 최우선 사용
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
@@ -290,7 +426,6 @@ def save_memo_data(memos):
         json.dump(memos, f, ensure_ascii=False, indent=2)
 
 def send_slack_notification(webhook_urls_raw, message_text):
-    """여러 개의 슬랙 Webhook URL(줄바꿈 또는 쉼표 구분)로 동시에 메시지를 발송합니다."""
     if not webhook_urls_raw:
         return False, "슬랙 Webhook URL이 설정되지 않았습니다."
 
@@ -715,7 +850,7 @@ def render_monthly_calendar_html(year, month, events_by_date, filter_types):
 
 
 # =========================================================
-# 5. 사이드바 설정 (다중 슬랙 웹훅 입력 & 데이터 복원)
+# 5. 사이드바 설정 (다중 슬랙 웹훅 & .html/.xls 완벽 연동)
 # =========================================================
 products = load_master_data()
 po_history = load_po_history()
@@ -839,36 +974,37 @@ with st.sidebar:
 
     st.divider()
 
-    st.subheader("📥 이지어드민 재고 엑셀 연동")
-    uploaded_file = st.file_uploader("이지어드민 파일 (.xls / .xlsx / .csv)", type=["xlsx", "xls", "csv"])
+    st.subheader("📥 이지어드민 재고 파일 연동")
+    uploaded_file = st.file_uploader(
+        "이지어드민 파일 (.xls / .html / .htm / .csv / .xlsx)",
+        type=["xls", "html", "htm", "xlsx", "csv"]
+    )
 
     if uploaded_file is not None:
         try:
-            file_name = uploaded_file.name.lower()
-            if file_name.endswith(".csv"):
-                df_ez = pd.read_csv(uploaded_file)
-            elif file_name.endswith(".xls"):
-                try:
-                    df_ez = pd.read_excel(uploaded_file, engine="xlrd")
-                except Exception:
-                    uploaded_file.seek(0)
-                    df_ez = pd.read_html(uploaded_file)[0]
-            else:
-                df_ez = pd.read_excel(uploaded_file, engine="openpyxl")
+            df_ez = parse_easyadmin_file(uploaded_file)
 
-            bc_col = next((c for c in df_ez.columns if "바코드" in str(c) or "barcode" in str(c).lower()), None)
-            stock_col = next((c for c in df_ez.columns if any(k in str(c) for k in ["가용재고", "현재고", "재고", "정상재고"])), None)
+            bc_col = next((c for c in df_ez.columns if any(k in str(c) for k in ["바코드", "상품코드"]) or "barcode" in str(c).lower()), None)
+            stock_col = next((c for c in df_ez.columns if any(k in str(c) for k in ["가용재고", "현재고", "정상재고", "재고"])), None)
             sales_col = next((c for c in df_ez.columns if any(k in str(c) for k in ["일평균", "판매량", "출고"])), None)
 
             if bc_col and stock_col:
+                st.caption(f"✅ 인식된 컬럼: 바코드(`{bc_col}`), 재고(`{stock_col}`)")
                 if st.button("🔄 현재고 데이터 동기화", type="primary", use_container_width=True):
                     ez_map = {}
                     for _, r in df_ez.iterrows():
                         b_val = str(r[bc_col]).strip()
-                        s_val = pd.to_numeric(r[stock_col], errors="coerce")
-                        d_val = pd.to_numeric(r[sales_col], errors="coerce") if sales_col else None
+                        s_raw = str(r[stock_col]).replace(",", "").strip()
+                        s_val = pd.to_numeric(s_raw, errors="coerce")
+                        d_val = None
+                        if sales_col:
+                            d_raw = str(r[sales_col]).replace(",", "").strip()
+                            d_val = pd.to_numeric(d_raw, errors="coerce")
                         if b_val and not pd.isna(s_val):
-                            ez_map[b_val] = {"stock": int(s_val), "sales": float(d_val) if (d_val is not None and not pd.isna(d_val)) else None}
+                            ez_map[b_val] = {
+                                "stock": int(s_val),
+                                "sales": float(d_val) if (d_val is not None and not pd.isna(d_val)) else None
+                            }
 
                     updated_cnt = 0
                     for item in products:
@@ -884,9 +1020,9 @@ with st.sidebar:
                     st.success(f"총 {updated_cnt}개 품목 동기화 완료!")
                     st.rerun()
             else:
-                st.warning("바코드 또는 현재고 컬럼을 찾을 수 없습니다.")
+                st.warning(f"바코드 또는 재고 컬럼을 찾을 수 없습니다. (추출된 컬럼: {list(df_ez.columns[:6])})")
         except Exception as e:
-            st.error(f"오류: {e}")
+            st.error(f"파일 분석 오류: {e}")
 
 
 # =========================================================
