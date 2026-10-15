@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import numpy as np
 import json
@@ -11,7 +12,7 @@ from PIL import Image
 from datetime import datetime, date, timedelta
 
 # =========================================================
-# 1. 기본 환경 설정 및 여우 아이콘(파비콘/모바일/바탕화면) 강제 적용
+# 1. 기본 환경 설정 및 크롬 바로가기/모바일 아이콘 강제 덮어쓰기
 # =========================================================
 ICON_PATH = "fox.png"
 page_icon_obj = Image.open(ICON_PATH) if os.path.exists(ICON_PATH) else "🦊"
@@ -23,44 +24,69 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-def inject_custom_app_icon_and_title(img_path, app_title="FLICKRFOX 상품관리"):
-    """
-    Streamlit의 기본 빨간 왕관 아이콘과 '- Streamlit' 꼬리표를 제거하고
-    PC 크롬 바로가기 및 모바일 홈 화면 아이콘을 fox.png로 강제 교체합니다.
-    """
+st.markdown("""
+    <style>
+        .block-container { padding-top: 2rem; padding-bottom: 3rem; }
+        div[data-testid="stMetricValue"] { font-size: 1.6rem !important; }
+    </style>
+""", unsafe_allow_html=True)
+
+def force_override_pwa_and_favicon(img_path, app_title="FLICKRFOX 상품관리"):
     if not os.path.exists(img_path):
         return
     with open(img_path, "rb") as f:
         b64_icon = base64.b64encode(f.read()).decode("utf-8")
 
-    st.markdown(f"""
-        <style>
-            .block-container {{ padding-top: 2rem; padding-bottom: 3rem; }}
-            div[data-testid="stMetricValue"] {{ font-size: 1.6rem !important; }}
-        </style>
+    # components.html은 차단되지 않고 실제로 실행되어 상위 프레임의 아이콘과 매니페스트를 교체합니다.
+    components.html(f"""
         <script>
             (function() {{
-                const iconData = "data:image/png;base64,{b64_icon}";
-                const targetTitle = "{app_title}";
-                function applyCustomMeta() {{
-                    const doc = window.parent.document;
-                    if (doc.title !== targetTitle) {{
-                        doc.title = targetTitle;
-                    }}
-                    const links = doc.querySelectorAll("link[rel*='icon'], link[rel='apple-touch-icon']");
-                    links.forEach(link => {{
-                        if (link.href !== iconData) {{
-                            link.href = iconData;
+                const iconUrl = "data:image/png;base64,{b64_icon}";
+                const titleText = "{app_title}";
+
+                function overrideParentMeta() {{
+                    try {{
+                        const doc = window.parent.document;
+                        if (doc.title !== titleText) doc.title = titleText;
+
+                        // 1. 기존 왕관 아이콘 태그 모두 여우 이미지로 변경
+                        doc.querySelectorAll("link[rel*='icon'], link[rel='apple-touch-icon']").forEach(el => {{
+                            el.href = iconUrl;
+                        }});
+
+                        // 2. 크롬 바로가기용 동적 Manifest 생성 및 덮어쓰기
+                        const manifestObj = {{
+                            "name": titleText,
+                            "short_name": titleText,
+                            "start_url": window.parent.location.href,
+                            "display": "standalone",
+                            "background_color": "#14171F",
+                            "theme_color": "#14171F",
+                            "icons": [
+                                {{ "src": iconUrl, "sizes": "192x192", "type": "image/png" }},
+                                {{ "src": iconUrl, "sizes": "512x512", "type": "image/png" }}
+                            ]
+                        }};
+                        const blob = new Blob([JSON.stringify(manifestObj)], {{type: 'application/json'}});
+                        const manifestURL = URL.createObjectURL(blob);
+                        let manifestLink = doc.querySelector("link[rel='manifest']");
+                        if (manifestLink) {{
+                            manifestLink.href = manifestURL;
+                        }} else {{
+                            manifestLink = doc.createElement("link");
+                            manifestLink.rel = "manifest";
+                            manifestLink.href = manifestURL;
+                            doc.head.appendChild(manifestLink);
                         }}
-                    }});
+                    }} catch (e) {{}}
                 }}
-                applyCustomMeta();
-                setInterval(applyCustomMeta, 1000);
+                overrideParentMeta();
+                setInterval(overrideParentMeta, 1500);
             }})();
         </script>
-    """, unsafe_allow_html=True)
+    """, height=0, width=0)
 
-inject_custom_app_icon_and_title(ICON_PATH, "FLICKRFOX 상품관리")
+force_override_pwa_and_favicon(ICON_PATH, "FLICKRFOX 상품관리")
 
 MASTER_FILE = "master_products.json"
 HISTORY_FILE = "po_history.json"
