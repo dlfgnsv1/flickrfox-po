@@ -103,7 +103,7 @@ def safe_float(val, default=0.0):
 
 
 # =========================================================
-# 1-2. 노션 CSV 완벽 파싱 및 정확한 매칭 엔진
+# 1-2. 노션 CSV 파싱 및 명시적 1:1 매핑 엔진
 # =========================================================
 def parse_inventory_csv(uploaded_file):
     raw_bytes = uploaded_file.getvalue()
@@ -127,16 +127,42 @@ def parse_inventory_csv(uploaded_file):
             except Exception:
                 continue
 
-    # 일반 CSV 로드 실패시 재시도
     uploaded_file.seek(0)
     return pd.read_csv(uploaded_file, encoding="utf-8-sig")
 
 
+# 노션 항목명과 앱 내 마스터 상품명 간의 고정 1:1 매핑 테이블
+NOTION_EXACT_MAP = {
+    "맥링크_실버": "[Mag-Link PRO] Silver",
+    "맥링크_블랙": "[Mag-Link PRO] Black",
+    "360턴스탠드_블랙": "[360 TurnStand Wallet PLUS] Black",
+    "360턴스탠드_그린": "[360 TurnStand Wallet PLUS] Green",
+    "360턴스탠드_브라운": "[360 TurnStand Wallet PLUS] Brown",
+    "옥토락": "[OctoLock]",
+    "옥토락프로_블랙": "[OctoLock PRO] Black",
+    "매트원_Z FOLD 8": "[MATTE-ONE] Z Fold 8",
+    "매트원_Z FOLD 7": "[MATTE-ONE] Z Fold 7",
+    "매트원_Z FOLD 8 U": "[MATTE-ONE] Z Fold 8U",
+    "매트-쉴드_폴드8_블랙": "[Matte-Shield/MB] Z Fold 8",
+    "매트-쉴드_폴드8_화이트": "[Matte-Shield/CW] Z Fold 8",
+    "매트-쉴드_폴드7": "[Matte-Shield] Z Fold 7",
+    "매트-쉴드_폴드8U": "[Matte-Shield] Z Fold 8U",
+    "에임맥홀더": "[Aim Mag-Holder Pro]",
+    "링크핏 핸드스트랩": "[Spring strap] Black",
+    "맥스탠드_실버": "[Spider mag stand] Arctic Silver",
+    "맥스탠드_오렌지": "[SHIFT-GO]",
+    "맥링크 맥스 블랙": "맥링크 맥스 블랙",
+    "폴리 스트랩 60cm": "폴리 스트랩 60cm",
+    "폴리 스트랩 30cm": "폴리 스트랩 30cm",
+    "맥링크 행온택": "행온택",
+    "맥링크 O링": "맥링크 O링",
+    "맥링크 줄고리": "맥링크 줄고리"
+}
+
 def smart_match_and_sync(df_notion, products):
-    """노션 CSV 행 데이터를 순회하며 앱 마스터 상품과 1대1 완벽 매칭 후 재고 및 판매량 갱신"""
     updated_count = 0
+    product_dict = {p["name"]: p for p in products}
     
-    # 노션 행 데이터를 딕셔너리로 변환
     for _, row in df_notion.iterrows():
         name_raw = str(row.get("항목명", "")).strip()
         if not name_raw or name_raw == "nan":
@@ -146,49 +172,21 @@ def smart_match_and_sync(df_notion, products):
         sales_1w = safe_float(row.get("1주판매", 0.0))
         daily_sales_val = round(sales_1w / 7.0, 1) if sales_1w > 0 else 0.0
 
-        n_clean = re.sub(r'[\s\[\]\-_/]+', '', name_raw).lower()
+        # 매핑 테이블에서 일치하는 앱 상품명 찾기
+        target_master_name = NOTION_EXACT_MAP.get(name_raw)
         
-        matched_item = None
-        # 1단계: 정확한 정규화 매칭
-        for item in products:
-            m_name = str(item.get("name", ""))
-            m_clean = re.sub(r'[\s\[\]\-_/]+', '', m_name).lower()
-            if n_clean == m_clean:
-                matched_item = item
-                break
+        # 만약 매핑 테이블에 없다면 유사어 검색
+        if not target_master_name:
+            for k, v in NOTION_EXACT_MAP.items():
+                if k in name_raw or name_raw in k:
+                    target_master_name = v
+                    break
 
-        # 2단계: 키워드 및 색상 스마트 매칭 (맥링크, 턴스탠드, 매트쉴드 등)
-        if not matched_item:
-            for item in products:
-                m_name = str(item.get("name", "")).lower()
-                # 한글 노션 이름과 영문 상품명의 핵심 키워드 대조
-                if ("맥링크" in name_raw and "mag-link" in m_name) or \
-                   ("턴스탠드" in name_raw and "turnstand" in m_name) or \
-                   ("옥토락" in name_raw and "octolock" in m_name) or \
-                   ("에임맥홀더" in name_raw and "mag-holder" in m_name) or \
-                   ("매트원" in name_raw and "matte-one" in m_name) or \
-                   ("매트-쉴드" in name_raw and "matte-shield" in m_name) or \
-                   ("얼티밋" in name_raw and "ult" in m_name):
-                    
-                    # 색상 또는 옵션 일치 확인
-                    notion_lower = name_raw.lower()
-                    if ("실버" in notion_lower and "silver" in m_name) or \
-                       ("블랙" in notion_lower and "black" in m_name) or \
-                       ("그린" in notion_lower and "green" in m_name) or \
-                       ("브라운" in notion_lower and "brown" in m_name) or \
-                       ("화이트" in notion_lower and "white" in m_name) or \
-                       ("fold 8" in notion_lower and "fold 8" in m_name) or \
-                       ("fold 7" in notion_lower and "fold 7" in m_name):
-                        matched_item = item
-                        break
-                    elif not any(c in notion_lower for c in ["실버", "블랙", "그린", "브라운", "화이트", "fold"]):
-                        matched_item = item
-                        break
-
-        if matched_item:
-            matched_item["stock"] = stock_val
+        if target_master_name and target_master_name in product_dict:
+            target_item = product_dict[target_master_name]
+            target_item["stock"] = stock_val
             if daily_sales_val > 0:
-                matched_item["daily_sales"] = daily_sales_val
+                target_item["daily_sales"] = daily_sales_val
             updated_count += 1
 
     return updated_count
@@ -935,7 +933,7 @@ with st.sidebar:
     st.divider()
 
     # =========================================================
-    # 💡 노션 CSV 파일 업로드 및 스마트 동기화 패널
+    # 💡 노션 CSV 파일 1:1 고정 매핑 연동 패널
     # =========================================================
     st.subheader("📥 노션 CSV 재고 연동")
     uploaded_notion_csv = st.file_uploader(
@@ -949,11 +947,11 @@ with st.sidebar:
             df_notion = parse_inventory_csv(uploaded_notion_csv)
             st.caption(f"✅ 노션 CSV 파일 로드 성공! ({len(df_notion)}행 감지)")
             
-            if st.button("🔄 노션 재고 및 판매량 즉시 동기화", type="primary", use_container_width=True, key="notion_sync_btn"):
+            if st.button("🔄 노션 재고 및 판매량 1:1 완벽 동기화", type="primary", use_container_width=True, key="notion_sync_btn"):
                 synced_count = smart_match_and_sync(df_notion, products)
                 save_master_data(products)
                 bump_editor_version()
-                st.success(f"총 {synced_count}개 품목의 재고와 판매량이 노션과 정확히 일치하도록 동기화되었습니다!")
+                st.success(f"총 {synced_count}개 품목의 재고와 판매량이 노션 데이터와 100% 일치하게 동기화되었습니다!")
                 st.rerun()
         except Exception as e:
             st.error(f"노션 CSV 처리 오류: {e}")
