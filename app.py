@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import json
 import os
+import re
 import math
 import calendar
 import requests
@@ -99,83 +100,111 @@ def safe_float(val, default=0.0):
 
 
 # =========================================================
-# 1-2. 이지어드민 전용 만능 파일 파서 (.xls / .html / .htm / .csv / .xlsx)
+# 1-2. 이지어드민 전용 만능 파일 파서 (MS Office HTML형 .xls 완벽 지원)
 # =========================================================
-class SimpleHTMLTableParser(HTMLParser):
-    """외부 라이브러리(lxml 등) 없이도 웹페이지(.html/.xls) 표를 완벽히 추출하는 내장 파서"""
+class RobustHTMLTableParser(HTMLParser):
+    """중첩 테이블이나 긴 CSS가 포함된 이지어드민 .xls / .html 파일에서도 모든 행(tr/td)을 정확히 추출"""
     def __init__(self):
         super().__init__()
-        self.in_cell = False
-        self.tables = []
-        self.curr_table = []
-        self.curr_row = []
-        self.curr_cell = []
+        self.rows = []
+        self.curr_row = None
+        self.curr_cell = None
+        self.in_ignore = False
 
     def handle_starttag(self, tag, attrs):
         t = tag.lower()
-        if t == "table":
-            self.curr_table = []
+        if t in ("style", "script", "head", "xml"):
+            self.in_ignore = True
         elif t == "tr":
             self.curr_row = []
         elif t in ("td", "th"):
-            self.in_cell = True
+            if self.curr_row is None:
+                self.curr_row = []
             self.curr_cell = []
+        elif t == "br" and self.curr_cell is not None:
+            self.curr_cell.append(" ")
 
     def handle_endtag(self, tag):
         t = tag.lower()
-        if t in ("td", "th"):
-            if self.in_cell:
-                self.curr_row.append("".join(self.curr_cell).strip())
-                self.in_cell = False
+        if t in ("style", "script", "head", "xml"):
+            self.in_ignore = False
+        elif t in ("td", "th"):
+            if self.curr_cell is not None and self.curr_row is not None:
+                cell_text = re.sub(r"\s+", " ", "".join(self.curr_cell)).strip()
+                self.curr_row.append(cell_text)
+                self.curr_cell = None
         elif t == "tr":
-            if self.curr_row:
-                self.curr_table.append(self.curr_row)
-        elif t == "table":
-            if self.curr_table:
-                self.tables.append(self.curr_table)
+            if self.curr_row and any(c != "" for c in self.curr_row):
+                self.rows.append(self.curr_row)
+            self.curr_row = None
 
     def handle_data(self, data):
-        if self.in_cell:
+        if not self.in_ignore and self.curr_cell is not None:
             self.curr_cell.append(data)
 
 
-def normalize_Header_df(df):
-    """표 상단에 불필요한 줄이 있을 경우 '바코드'나 '상품명'이 있는 줄을 찾아 컬럼명으로 자동 승격"""
+HEADER_KEYWORDS = ["바코드", "상품코드", "상품명", "품목명", "가용재고", "현재고", "정상재고", "재고", "옵션", "공급처"]
+
+def promote_header_row(df):
+    """표 상단에 제목 행이 섞여 있을 때 바코드/상품명/재고 키워드가 가장 많이 포함된 행을 컬럼명으로 지정"""
     df = df.dropna(how="all").reset_index(drop=True)
     if df.empty:
         return df
 
+    # 현재 컬럼명이 이미 정상인지 확인
     col_str = " ".join(str(c) for c in df.columns)
-    if any(k in col_str for k in ["바코드", "상품코드", "가용재고", "현재고", "정상재고"]) or "barcode" in col_str.lower():
+    if sum(1 for k in HEADER_KEYWORDS if k in col_str) >= 2:
         return df
 
-    for idx in range(min(15, len(df))):
+    best_idx = None
+    best_score = 0
+    for idx in range(min(25, len(df))):
         row_vals = [str(v).strip() for v in df.iloc[idx].values]
         row_str = " ".join(row_vals)
-        if any(k in row_str for k in ["바코드", "상품코드", "가용재고", "현재고", "정상재고"]) or "barcode" in row_str.lower():
-            new_df = df.iloc[idx + 1:].copy()
-            new_df.columns = [v if v else f"col_{i}" for i, v in enumerate(row_vals)]
-            return new_df.reset_index(drop=True)
+        score = sum(1 for k in HEADER_KEYWORDS if k in row_str)
+        if score > best_score:
+            best_score = score
+            best_idx = idx
+
+    if best_idx is not None and best_score >= 1:
+        raw_cols = [str(v).strip() for v in df.iloc[best_idx].values]
+        # 중복 컬럼명 방지
+        seen = {}
+        clean_cols = []
+        for i, c in enumerate(raw_cols):
+            cname = c if c else f"컬럼_{i+1}"
+            if cname in seen:
+                seen[cname] += 1
+                cname = f"{cname}_{seen[cname]}"
+            else:
+                seen[cname] = 1
+            clean_cols.append(cname)
+
+        new_df = df.iloc[best_idx + 1:].copy()
+        new_df.columns = clean_cols
+        return new_df.reset_index(drop=True)
+
     return df
 
 
 def parse_easyadmin_file(uploaded_file):
-    """이지어드민에서 받은 .xls(실제 HTML 또는 바이너리), .html, .htm, .csv, .xlsx를 모두 판별하여 DataFrame으로 변환"""
+    """이지어드민 .xls(실제 HTML/XML), .html, .htm, .csv, .xlsx 파일을 모두 판별하여 DataFrame으로 변환"""
     raw_bytes = uploaded_file.getvalue()
     fname = uploaded_file.name.lower()
 
-    # 1) 파일 앞부분을 검사해 웹페이지(HTML) 형식인지 자동 확인
-    head_sample = raw_bytes[:2048].lower()
-    is_html_content = (
+    # 파일 전체에서 HTML/XML 태그 여부 확인 (<link rel=File-List, <table, <tr, <td 등)
+    raw_lower = raw_bytes.lower()
+    is_html_like = (
         fname.endswith((".html", ".htm"))
-        or b"<html" in head_sample
-        or b"<table" in head_sample
-        or b"<!doctype html" in head_sample
-        or b"<meta" in head_sample
+        or b"<table" in raw_lower
+        or b"<tr" in raw_lower
+        or b"<td" in raw_lower
+        or b"file-list" in raw_lower
+        or b"<html" in raw_lower
+        or b"urn:schemas-microsoft-com:office:excel" in raw_lower
     )
 
-    # 2) HTML 형식(.html 이거나 HTML로 저장된 .xls) 파싱
-    if is_html_content:
+    if is_html_like:
         text = None
         for enc in ("utf-8-sig", "utf-8", "cp949", "euc-kr"):
             try:
@@ -184,53 +213,41 @@ def parse_easyadmin_file(uploaded_file):
             except Exception:
                 continue
         if text is None:
-            text = raw_bytes.decode("utf-8", errors="ignore")
+            text = raw_bytes.decode("cp949", errors="ignore")
 
-        parser = SimpleHTMLTableParser()
+        parser = RobustHTMLTableParser()
         parser.feed(text)
-        if parser.tables:
-            best_df = None
-            for tbl in parser.tables:
-                max_cols = max((len(r) for r in tbl), default=0)
-                if max_cols == 0:
-                    continue
-                padded = [r + [""] * (max_cols - len(r)) for r in tbl]
-                temp_df = pd.DataFrame(padded)
-                temp_df = normalize_Header_df(temp_df)
-                col_join = " ".join(str(c) for c in temp_df.columns)
-                if any(k in col_join for k in ["바코드", "가용재고", "현재고", "재고"]):
-                    return temp_df
-                if best_df is None or len(temp_df) > len(best_df):
-                    best_df = temp_df
-            if best_df is not None:
-                return best_df
 
-    # 3) 일반 CSV 파일인 경우
-    if fname.endswith(".csv"):
-        for enc in ("utf-8-sig", "cp949", "euc-kr", "utf-8"):
-            try:
-                uploaded_file.seek(0)
-                return normalize_Header_df(pd.read_csv(uploaded_file, encoding=enc))
-            except Exception:
-                continue
+        if parser.rows:
+            # 가장 흔한 열 개수(또는 최대 열 개수)에 맞춰 테이블 정렬
+            max_cols = max(len(r) for r in parser.rows)
+            valid_rows = [r + [""] * (max_cols - len(r)) for r in parser.rows if len(r) >= 2]
+            if valid_rows:
+                df_html = pd.DataFrame(valid_rows)
+                df_html = promote_header_row(df_html)
+                return df_html
 
-    # 4) 실제 엑셀 바이너리(.xls / .xlsx) 또는 탭 구분 텍스트(.xls)인 경우
+    # 진짜 바이너리 엑셀(.xls / .xlsx) 시도
     for eng in ("xlrd", "openpyxl"):
         try:
             uploaded_file.seek(0)
-            return normalize_Header_df(pd.read_excel(uploaded_file, engine=eng))
+            df_ex = pd.read_excel(uploaded_file, engine=eng)
+            return promote_header_row(df_ex)
         except Exception:
             continue
 
-    # 5) 탭(\t)으로 구분된 텍스트형 .xls 파일인 경우
-    for enc in ("utf-8-sig", "cp949", "euc-kr"):
-        try:
-            uploaded_file.seek(0)
-            return normalize_Header_df(pd.read_csv(uploaded_file, sep="\t", encoding=enc))
-        except Exception:
-            continue
+    # CSV 또는 탭(\t) 구분 텍스트 시도
+    for sep in (",", "\t"):
+        for enc in ("utf-8-sig", "cp949", "euc-kr", "utf-8"):
+            try:
+                uploaded_file.seek(0)
+                df_csv = pd.read_csv(uploaded_file, sep=sep, encoding=enc)
+                if len(df_csv.columns) >= 2:
+                    return promote_header_row(df_csv)
+            except Exception:
+                continue
 
-    raise ValueError("파일 형식을 인식할 수 없습니다. 이지어드민 원본 파일(.xls, .html, .csv)인지 확인해 주세요.")
+    raise ValueError("표 데이터를 추출할 수 없습니다. 파일 내부에 재고 표가 포함되어 있는지 확인해 주세요.")
 
 
 def get_slack_webhook_url():
@@ -983,44 +1000,52 @@ with st.sidebar:
     if uploaded_file is not None:
         try:
             df_ez = parse_easyadmin_file(uploaded_file)
+            cols = list(df_ez.columns)
 
-            bc_col = next((c for c in df_ez.columns if any(k in str(c) for k in ["바코드", "상품코드"]) or "barcode" in str(c).lower()), None)
-            stock_col = next((c for c in df_ez.columns if any(k in str(c) for k in ["가용재고", "현재고", "정상재고", "재고"])), None)
-            sales_col = next((c for c in df_ez.columns if any(k in str(c) for k in ["일평균", "판매량", "출고"])), None)
+            # 자동 컬럼 탐색 (바코드 / 상품코드 / 상품명 순)
+            auto_bc = next((c for c in cols if any(k in str(c) for k in ["바코드", "상품코드"]) or "barcode" in str(c).lower()), None)
+            if not auto_bc:
+                auto_bc = next((c for c in cols if any(k in str(c) for k in ["상품명", "품목명"])), cols[0] if cols else None)
 
-            if bc_col and stock_col:
-                st.caption(f"✅ 인식된 컬럼: 바코드(`{bc_col}`), 재고(`{stock_col}`)")
-                if st.button("🔄 현재고 데이터 동기화", type="primary", use_container_width=True):
-                    ez_map = {}
-                    for _, r in df_ez.iterrows():
-                        b_val = str(r[bc_col]).strip()
-                        s_raw = str(r[stock_col]).replace(",", "").strip()
-                        s_val = pd.to_numeric(s_raw, errors="coerce")
-                        d_val = None
-                        if sales_col:
-                            d_raw = str(r[sales_col]).replace(",", "").strip()
-                            d_val = pd.to_numeric(d_raw, errors="coerce")
-                        if b_val and not pd.isna(s_val):
-                            ez_map[b_val] = {
-                                "stock": int(s_val),
-                                "sales": float(d_val) if (d_val is not None and not pd.isna(d_val)) else None
-                            }
+            auto_stock = next((c for c in cols if any(k in str(c) for k in ["가용재고", "현재고", "정상재고", "실재고", "재고"])), cols[1] if len(cols) > 1 else None)
+            auto_sales = next((c for c in cols if any(k in str(c) for k in ["일평균", "판매량", "출고"])), None)
 
-                    updated_cnt = 0
-                    for item in products:
-                        bc_key = str(item.get("barcode", "")).strip()
-                        if bc_key in ez_map:
-                            item["stock"] = ez_map[bc_key]["stock"]
-                            if ez_map[bc_key]["sales"] is not None:
-                                item["daily_sales"] = round(ez_map[bc_key]["sales"], 1)
-                            updated_cnt += 1
+            st.caption("✅ 파일 표 추출 성공! 컬럼을 확인 후 동기화를 눌러주세요.")
+            sel_bc_col = st.selectbox("매칭 기준 컬럼 (바코드/상품코드/상품명)", cols, index=cols.index(auto_bc) if auto_bc in cols else 0)
+            sel_stock_col = st.selectbox("재고 수량 컬럼 (가용재고/현재고)", cols, index=cols.index(auto_stock) if auto_stock in cols else 0)
 
-                    save_master_data(products)
-                    bump_editor_version()
-                    st.success(f"총 {updated_cnt}개 품목 동기화 완료!")
-                    st.rerun()
-            else:
-                st.warning(f"바코드 또는 재고 컬럼을 찾을 수 없습니다. (추출된 컬럼: {list(df_ez.columns[:6])})")
+            if st.button("🔄 현재고 데이터 동기화", type="primary", use_container_width=True):
+                ez_map = {}
+                for _, r in df_ez.iterrows():
+                    b_val = str(r[sel_bc_col]).strip()
+                    s_raw = str(r[sel_stock_col]).replace(",", "").strip()
+                    s_val = pd.to_numeric(s_raw, errors="coerce")
+                    d_val = None
+                    if auto_sales and auto_sales in df_ez.columns:
+                        d_raw = str(r[auto_sales]).replace(",", "").strip()
+                        d_val = pd.to_numeric(d_raw, errors="coerce")
+                    if b_val and not pd.isna(s_val):
+                        ez_map[b_val] = {
+                            "stock": int(s_val),
+                            "sales": float(d_val) if (d_val is not None and not pd.isna(d_val)) else None
+                        }
+
+                updated_cnt = 0
+                for item in products:
+                    bc_key = str(item.get("barcode", "")).strip()
+                    name_key = str(item.get("name", "")).strip()
+                    matched_info = ez_map.get(bc_key) or ez_map.get(name_key)
+                    if matched_info:
+                        item["stock"] = matched_info["stock"]
+                        if matched_info["sales"] is not None:
+                            item["daily_sales"] = round(matched_info["sales"], 1)
+                        updated_cnt += 1
+
+                save_master_data(products)
+                bump_editor_version()
+                st.toast(f"✅ 총 {updated_cnt}개 품목 현재고 동기화 완료!")
+                st.success(f"총 {updated_cnt}개 품목 동기화 완료!")
+                st.rerun()
         except Exception as e:
             st.error(f"파일 분석 오류: {e}")
 
