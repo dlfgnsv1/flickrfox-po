@@ -74,13 +74,8 @@ HISTORY_FILE = "po_history.json"
 MEMO_FILE = "calendar_memos.json"
 CONFIG_FILE = "local_config.json"
 
-def get_admin_password():
-    try:
-        if "ADMIN_PASSWORD" in st.secrets:
-            return st.secrets["ADMIN_PASSWORD"]
-    except Exception:
-        pass
-    return os.environ.get("ADMIN_PASSWORD", "fox1989@@")
+# 관리자 비밀번호 고정
+ADMIN_PASSWORD = "fox1989@@"
 
 def get_slack_webhook_url():
     try:
@@ -118,7 +113,6 @@ def save_custom_webhook(new_url):
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
 
-ADMIN_PASSWORD = get_admin_password()
 SLACK_WEBHOOK_URL = get_slack_webhook_url()
 
 DEFAULT_PRODUCTS = [
@@ -190,7 +184,7 @@ def save_memo_data(memos):
 
 def send_slack_notification(webhook_url, message_text):
     if not webhook_url:
-        return False, "슬랙 Webhook URL이 설정되지 않았습니다."
+        return False, "슬랙 웹훅 URL이 설정되지 않았습니다."
     try:
         resp = requests.post(
             webhook_url,
@@ -638,14 +632,19 @@ with st.sidebar:
     st.divider()
 
     st.subheader("📥 이지어드민 재고 엑셀 연동")
-    uploaded_file = st.file_uploader("이지어드민 파일 (.xlsx / .csv)", type=["xlsx", "xls", "csv"])
+    uploaded_file = st.file_uploader("이지어드민 파일 (.xls / .xlsx / .csv)", type=["xlsx", "xls", "csv"])
 
     if uploaded_file is not None:
         try:
-            if uploaded_file.name.endswith(".csv"):
+            file_name = uploaded_file.name.lower()
+            if file_name.endswith(".csv"):
                 df_ez = pd.read_csv(uploaded_file)
+            elif file_name.endswith(".xls"):
+                # 구버전 .xls 파일은 xlrd 엔진 지정
+                df_ez = pd.read_excel(uploaded_file, engine="xlrd")
             else:
-                df_ez = pd.read_excel(uploaded_file)
+                # .xlsx 파일은 openpyxl 엔진 지정
+                df_ez = pd.read_excel(uploaded_file, engine="openpyxl")
 
             bc_col = next((c for c in df_ez.columns if "바코드" in str(c) or "barcode" in str(c).lower()), None)
             stock_col = next((c for c in df_ez.columns if any(k in str(c) for k in ["가용재고", "현재고", "재고", "정상재고"])), None)
@@ -693,7 +692,7 @@ tab_calendar, tab_dashboard, tab_history, tab_master = st.tabs([
 
 
 # ---------------------------------------------------------
-# [TAB 1] 📅 재고·입고 캘린더 (요약 최우선 배치)
+# [TAB 1] 📅 재고·입고 캘린더
 # ---------------------------------------------------------
 with tab_calendar:
     today = date.today()
@@ -702,7 +701,7 @@ with tab_calendar:
         build_calendar_events(products, po_history, memo_data, sales_multiplier)
     )
 
-    # 1. 🔍 상단 4대 요약 KPI 카드
+    # 상단 4대 요약 KPI 카드
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("🚨 현재 품절 상품", f"{len(out_of_stock_list)}개", delta="즉시 확인 필요", delta_color="inverse")
     k2.metric("🔥 품절임박 / 입고전품절", f"{len(stockout_soon_list)}개", delta="마케팅/발주 점검", delta_color="off")
@@ -711,7 +710,7 @@ with tab_calendar:
 
     st.write("")
 
-    # 2. 🚨 품절 상품별 개별 카드 반복 생성 (3개면 3개 각각 독립된 카드로 출력)
+    # 품절 상품별 개별 카드 반복 생성
     if out_of_stock_list:
         st.markdown("### 🚨 현재 품절 중인 상품 긴급 안내")
         for oos in out_of_stock_list:
@@ -727,7 +726,6 @@ with tab_calendar:
 
     st.divider()
 
-    # 3. 📋 캘린더보다 위로 배치된 [요약 탭 및 상세 일정 조회 영역]
     st.markdown("### 📊 실시간 재고·품절 현황 및 상세 분석")
     st.caption("캘린더에 앞서 확인해야 할 품절 상품, 임박 품목, 전체 입고 스케줄 및 날짜별 상세 내역입니다.")
 
@@ -779,7 +777,6 @@ with tab_calendar:
 
     st.divider()
 
-    # 4. 🗓️ 맨 아래에 배치된 월간 캘린더 & 메모 등록 바
     st.markdown("### 🗓️ 월간 캘린더 및 운영 메모 보드")
     st.caption("전체적인 입고·품절 흐름과 날짜별 특이사항을 한 달 단위로 조망합니다.")
 
