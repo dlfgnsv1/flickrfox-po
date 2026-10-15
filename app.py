@@ -40,21 +40,21 @@ st.markdown("""
         div[data-testid="stMetricLabel"] { font-size: 1.05rem !important; font-weight: 700 !important; color: #94A3B8 !important; }
         div[data-testid="stMetricValue"] { font-size: 2.1rem !important; font-weight: 800 !important; color: #F8FAFC !important; }
         
-        /* 긴급 품절 카드 스타일 (상단 KPI와 통일된 카드 형태) */
+        /* 개별 긴급 품절 카드 스타일 */
         .oos-card {
             background-color: #1E222D;
             border: 1.5px solid #EF4444;
-            padding: 20px 22px;
+            padding: 16px 20px;
             border-radius: 12px;
             color: #F8FAFC;
-            margin-bottom: 1.5rem;
-            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.25);
+            margin-bottom: 12px;
+            box-shadow: 0 4px 10px rgba(239, 68, 68, 0.2);
         }
         .oos-card-title {
-            font-size: 1.1rem;
+            font-size: 1.05rem;
             font-weight: 700;
             color: #EF4444;
-            margin-bottom: 8px;
+            margin-bottom: 6px;
             display: flex;
             align-items: center;
             gap: 8px;
@@ -62,7 +62,9 @@ st.markdown("""
         .oos-card-content {
             font-size: 0.95rem;
             color: #E2E8F0;
-            line-height: 1.5;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
     </style>
 """, unsafe_allow_html=True)
@@ -709,15 +711,19 @@ with tab_calendar:
 
     st.write("")
 
-    # 2. 🚨 카드 형태로 깔끔하게 디자인된 품절 상품 안내 영역 (불필요한 문구 삭제)
+    # 2. 🚨 품절 상품별 개별 카드 반복 생성 (3개면 3개 각각 독립된 카드로 출력)
     if out_of_stock_list:
-        oos_names = ", ".join([f"**{x['품목명']}** (입고예정: {x['다음 입고예정']})" for x in out_of_stock_list])
-        st.markdown(f"""
-            <div class="oos-card">
-                <div class="oos-card-title">🚨 현재 품절 중인 상품 안내</div>
-                <div class="oos-card-content">{oos_names}</div>
-            </div>
-        """, unsafe_allow_html=True)
+        st.markdown("### 🚨 현재 품절 중인 상품 긴급 안내")
+        for oos in out_of_stock_list:
+            st.markdown(f"""
+                <div class="oos-card">
+                    <div class="oos-card-title">🚨 품절 품목: {oos['품목명']}</div>
+                    <div class="oos-card-content">
+                        <span><b>바코드:</b> {oos['바코드']}</span>
+                        <span><b>다음 입고 예정:</b> <span style="color:#60A5FA;">{oos['다음 입고예정']}</span></span>
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
 
     st.divider()
 
