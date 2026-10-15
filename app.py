@@ -7,7 +7,6 @@ import re
 import math
 import calendar
 import requests
-from html.parser import HTMLParser
 from datetime import datetime, date, timedelta
 
 # =========================================================
@@ -100,69 +99,38 @@ def safe_float(val, default=0.0):
 
 
 # =========================================================
-# 1-2. XML 및 HTML/SpreadsheetML 지원 만능 파서
+# 1-2. 텍스트/표 파싱 유틸리티 (복사-붙여넣기 분석용)
 # =========================================================
-class SpreadsheetXMLParser(HTMLParser):
-    """Excel XML (SpreadsheetML) 및 HTML 테이블 구조를 모두 지원하는 범용 파서"""
-    def __init__(self):
-        super().__init__()
-        self.rows = []
-        self.curr_row = None
-        self.curr_cell = None
-        self.in_ignore = False
+def parse_pasted_table_text(raw_text):
+    """사용자가 엑셀이나 웹에서 드래그하여 붙여넣은 탭/공백 구분 텍스트를 DataFrame으로 변환"""
+    lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+    if not lines:
+        raise ValueError("입력된 텍스트가 없습니다.")
+    
+    # 탭(\t) 또는 다중 공백으로 분할
+    parsed_rows = []
+    for line in lines:
+        # 먼저 탭으로 분할 시도
+        parts = line.split("\t")
+        if len(parts) <= 1:
+            # 탭이 없으면 2개 이상의 공백으로 분할 시도
+            parts = re.split(r'\s{2,}', line)
+        parsed_rows.append([p.strip() for p in parts])
 
-    def handle_starttag(self, tag, attrs):
-        t = tag.lower()
-        if t in ("style", "script", "head", "xml", "o:documentproperties"):
-            self.in_ignore = True
-        elif t in ("tr", "ss:row"):
-            self.curr_row = []
-        elif t in ("td", "th", "ss:cell"):
-            if self.curr_row is None:
-                self.curr_row = []
-            self.curr_cell = []
-
-    def handle_endtag(self, tag):
-        t = tag.lower()
-        if t in ("style", "script", "head", "xml", "o:documentproperties"):
-            self.in_ignore = False
-        elif t in ("td", "th", "ss:cell"):
-            if self.curr_cell is not None and self.curr_row is not None:
-                cell_text = re.sub(r"\s+", " ", "".join(self.curr_cell)).strip()
-                self.curr_row.append(cell_text)
-                self.curr_cell = None
-        elif t in ("tr", "ss:row"):
-            if self.curr_row and any(c != "" for c in self.curr_row):
-                self.rows.append(self.curr_row)
-            self.curr_row = None
-
-    def handle_data(self, data):
-        if not self.in_ignore and self.curr_cell is not None:
-            self.curr_cell.append(data)
-
-
-HEADER_KEYWORDS = ["바코드", "상품코드", "상품명", "품목명", "가용재고", "현재고", "정상재고", "재고", "옵션", "공급처"]
-
-def promote_header_row(df):
-    df = df.dropna(how="all").reset_index(drop=True)
-    if df.empty:
-        return df
-
-    col_str = " ".join(str(c) for c in df.columns)
-    if sum(1 for k in HEADER_KEYWORDS if k in col_str) >= 2:
-        return df
-
-    best_idx = None
-    best_score = 0
-    for idx in range(min(30, len(df))):
-        row_vals = [str(v).strip() for v in df.iloc[idx].values]
-        row_str = " ".join(row_vals)
-        score = sum(1 for k in HEADER_KEYWORDS if k in row_str)
-        if score > best_score:
-            best_score = score
+    max_cols = max(len(r) for r in parsed_rows)
+    padded = [r + [""] * (max_cols - len(r)) for r in parsed_rows]
+    df = pd.DataFrame(padded)
+    
+    # 바코드나 재고 키워드가 포함된 행을 헤더로 승격
+    header_keywords = ["바코드", "상품코드", "상품명", "품목명", "가용재고", "현재고", "정상재고", "재고"]
+    best_idx = 0
+    for idx, row in df.iterrows():
+        row_str = " ".join(str(v) for v in row.values)
+        if any(k in row_str for k in header_keywords):
             best_idx = idx
+            break
 
-    if best_idx is not None and best_score >= 1:
+    if best_idx < len(df):
         raw_cols = [str(v).strip() for v in df.iloc[best_idx].values]
         seen = {}
         clean_cols = []
@@ -174,62 +142,12 @@ def promote_header_row(df):
             else:
                 seen[cname] = 1
             clean_cols.append(cname)
-
-        new_df = df.iloc[best_idx + 1:].copy()
-        new_df.columns = clean_cols
-        return new_df.reset_index(drop=True)
+        
+        df_final = df.iloc[best_idx + 1:].copy()
+        df_final.columns = clean_cols
+        return df_final.reset_index(drop=True)
 
     return df
-
-
-def parse_easyadmin_file(uploaded_file):
-    raw_bytes = uploaded_file.getvalue()
-    fname = uploaded_file.name.lower()
-
-    # 1) SpreadsheetML (XML형 엑셀) 또는 HTML 문서 파싱 시도
-    text = None
-    for enc in ("utf-8-sig", "utf-8", "cp949", "euc-kr"):
-        try:
-            text = raw_bytes.decode(enc)
-            break
-        except Exception:
-            continue
-    if text is None:
-        text = raw_bytes.decode("cp949", errors="ignore")
-
-    parser = SpreadsheetXMLParser()
-    parser.feed(text)
-
-    if parser.rows:
-        max_cols = max(len(r) for r in parser.rows)
-        valid_rows = [r + [""] * (max_cols - len(r)) for r in parser.rows if len(r) >= 2]
-        if valid_rows:
-            df_xml = pd.DataFrame(valid_rows)
-            df_xml = promote_header_row(df_xml)
-            if len(df_xml.columns) >= 2 and len(df_xml) > 0:
-                return df_xml
-
-    # 2) 표준 엑셀(.xls / .xlsx) 시도
-    for eng in ("xlrd", "openpyxl"):
-        try:
-            uploaded_file.seek(0)
-            df_ex = pd.read_excel(uploaded_file, engine=eng)
-            return promote_header_row(df_ex)
-        except Exception:
-            continue
-
-    # 3) CSV 또는 탭 구분 텍스트 시도
-    for sep in (",", "\t"):
-        for enc in ("utf-8-sig", "cp949", "euc-kr", "utf-8"):
-            try:
-                uploaded_file.seek(0)
-                df_csv = pd.read_csv(uploaded_file, sep=sep, encoding=enc)
-                if len(df_csv.columns) >= 2:
-                    return promote_header_row(df_csv)
-            except Exception:
-                continue
-
-    raise ValueError("표 데이터를 추출할 수 없습니다. 파일 내부에 재고 표가 포함되어 있는지 확인해 주세요.")
 
 
 def get_slack_webhook_url():
@@ -849,7 +767,7 @@ def render_monthly_calendar_html(year, month, events_by_date, filter_types):
 
 
 # =========================================================
-# 5. 사이드바 설정
+# 5. 사이드바 설정 (복사-붙여넣기 동기화 패널 탑재)
 # =========================================================
 products = load_master_data()
 po_history = load_po_history()
@@ -973,16 +891,23 @@ with st.sidebar:
 
     st.divider()
 
-    st.subheader("📥 이지어드민 재고 파일 연동")
-    uploaded_file = st.file_uploader(
-        "이지어드민 파일 (.xls / .html / .htm / .csv / .xlsx)",
-        type=["xls", "html", "htm", "xlsx", "csv"]
+    # =========================================================
+    # 💡 엑셀 복사-붙여넣기 동기화 패널 (이지어드민 파일 형식 제약 완벽 해결)
+    # =========================================================
+    st.subheader("📋 이지어드민 재고 붙여넣기 동기화")
+    st.caption("이지어드민 표 전체를 복사(Ctrl+C)한 뒤 아래 칸에 붙여넣기(Ctrl+V) 하세요.")
+    
+    pasted_text = st.text_area(
+        "여기에 표 붙여넣기 (Ctrl+V)",
+        placeholder="바코드\t상품명\t가용재고\nFLCK00894\t[Mag-Link] Black\t294",
+        height=120,
+        key="pasted_excel_text"
     )
 
-    if uploaded_file is not None:
+    if pasted_text.strip():
         try:
-            df_ez = parse_easyadmin_file(uploaded_file)
-            cols = list(df_ez.columns)
+            df_pasted = parse_pasted_table_text(pasted_text)
+            cols = list(df_pasted.columns)
 
             auto_bc = next((c for c in cols if any(k in str(c) for k in ["바코드", "상품코드"]) or "barcode" in str(c).lower()), None)
             if not auto_bc:
@@ -991,18 +916,18 @@ with st.sidebar:
             auto_stock = next((c for c in cols if any(k in str(c) for k in ["가용재고", "현재고", "정상재고", "실재고", "재고"])), cols[1] if len(cols) > 1 else None)
             auto_sales = next((c for c in cols if any(k in str(c) for k in ["일평균", "판매량", "출고"])), None)
 
-            st.caption(f"✅ 파일 표 추출 성공! 컬럼을 확인 후 동기화를 눌러주세요.")
-            sel_bc_col = st.selectbox("매칭 기준 컬럼 (바코드/상품코드/상품명)", cols, index=cols.index(auto_bc) if auto_bc in cols else 0)
-            sel_stock_col = st.selectbox("재고 수량 컬럼 (가용재고/현재고)", cols, index=cols.index(auto_stock) if auto_stock in cols else 0)
+            st.caption(f"✅ 붙여넣은 표 분석 성공! ({len(df_pasted)}행 감지)")
+            sel_bc_col = st.selectbox("기준 컬럼 (바코드/상품명)", cols, index=cols.index(auto_bc) if auto_bc in cols else 0, key="paste_bc")
+            sel_stock_col = st.selectbox("재고 수량 컬럼 (현재고)", cols, index=cols.index(auto_stock) if auto_stock in cols else 0, key="paste_st")
 
-            if st.button("🔄 현재고 데이터 동기화", type="primary", use_container_width=True):
+            if st.button("🔄 붙여넣은 표로 현재고 동기화", type="primary", use_container_width=True, key="paste_sync_btn"):
                 ez_map = {}
-                for _, r in df_ez.iterrows():
+                for _, r in df_pasted.iterrows():
                     b_val = str(r[sel_bc_col]).strip()
                     s_raw = str(r[sel_stock_col]).replace(",", "").strip()
                     s_val = pd.to_numeric(s_raw, errors="coerce")
                     d_val = None
-                    if auto_sales and auto_sales in df_ez.columns:
+                    if auto_sales and auto_sales in df_pasted.columns:
                         d_raw = str(r[auto_sales]).replace(",", "").strip()
                         d_val = pd.to_numeric(d_raw, errors="coerce")
                     if b_val and not pd.isna(s_val):
@@ -1024,10 +949,10 @@ with st.sidebar:
 
                 save_master_data(products)
                 bump_editor_version()
-                st.success(f"총 {updated_cnt}개 품목 동기화 완료!")
+                st.success(f"총 {updated_cnt}개 품목 현재고 동기화 완료!")
                 st.rerun()
         except Exception as e:
-            st.error(f"파일 분석 오류: {e}")
+            st.error(f"붙여넣기 분석 오류: {e}")
 
 
 # =========================================================
