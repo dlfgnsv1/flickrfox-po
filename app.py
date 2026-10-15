@@ -133,9 +133,38 @@ DEFAULT_PRODUCTS = [
     {"name": "[SHIFT-GO]", "barcode": "FLCK00856", "supplier": "Landscape", "lead_time": 30, "moq": 500, "unit_price": 8000, "stock": 0, "daily_sales": 0.0, "status": "정상"}
 ]
 
+# 캡처 화면 기반 복구된 초기 발주 히스토리 데이터
+DEFAULT_HISTORY = [
+    {"order_id": "PO-20261013-01", "date": "2026-10-13", "name": "맥링크 미니 샘플", "barcode": "FLCK00894", "supplier": "Aiweile", "po_qty": 1, "unit_price": 50844, "total_price": 50844, "expected_arrival": "2026-11-05", "status": "발주완료", "memo": "리드타임 14일"},
+    {"order_id": "PO-20261012-02", "date": "2026-10-12", "name": "매트쉴드 fold8", "barcode": "FLCK00902", "supplier": "Swist", "po_qty": 200, "unit_price": 6690, "total_price": 1338000, "expected_arrival": "2026-10-26", "status": "발주완료", "memo": "리드타임 3일"},
+    {"order_id": "PO-20261012-03", "date": "2026-10-12", "name": "옥토릭", "barcode": "FLCK00609", "supplier": "X-World", "po_qty": 500, "unit_price": 2448, "total_price": 1224270, "expected_arrival": "2026-11-03", "status": "발주완료", "memo": "리드타임 11일"},
+    {"order_id": "PO-20261013-04", "date": "2026-10-13", "name": "턴스탠드", "barcode": "FLCK00587", "supplier": "Landscape", "po_qty": 1220, "unit_price": 5191, "total_price": 6333557, "expected_arrival": "2026-11-18", "status": "발주완료", "memo": "리드타임 27일"},
+    {"order_id": "PO-20261013-05", "date": "2026-10-13", "name": "폴리 스트랩 60cm", "barcode": "FLCK00838", "supplier": "D.y", "po_qty": 1500, "unit_price": 307, "total_price": 461610, "expected_arrival": "2026-11-05", "status": "발주완료", "memo": "리드타임 14일"},
+    {"order_id": "PO-20261013-06", "date": "2026-10-13", "name": "폴리 스트랩 30cm", "barcode": "FLCK00838", "supplier": "D.y", "po_qty": 1500, "unit_price": 247, "total_price": 371295, "expected_arrival": "2026-11-05", "status": "발주완료", "memo": "리드타임 14일"},
+    {"order_id": "PO-20261012-07", "date": "2026-10-12", "name": "맥링크 맥스 블랙", "barcode": "FLCK00894", "supplier": "Aiweile", "po_qty": 300, "unit_price": 16056, "total_price": 4816800, "expected_arrival": "2026-11-17", "status": "주문승인", "memo": "리드타임 25일"},
+    {"order_id": "PO-20261008-08", "date": "2026-10-08", "name": "행온택", "barcode": "FLCK00728", "supplier": "Gifts Manufacturer", "po_qty": 5000, "unit_price": 165, "total_price": 822870, "expected_arrival": "2026-10-27", "status": "발주완료", "memo": "리드타임 10일"},
+    {"order_id": "PO-20261008-09", "date": "2026-10-08", "name": "매트원", "barcode": "FLCK00867", "supplier": "Sanzhou", "po_qty": 500, "unit_price": 2271, "total_price": 1135962, "expected_arrival": "2026-11-03", "status": "주문승인", "memo": "리드타임 17일"},
+    {"order_id": "PO-20261007-10", "date": "2026-10-07", "name": "맥링크 O링", "barcode": "FLCK00746", "supplier": "Xiangxing Hardware", "po_qty": 5000, "unit_price": 113, "total_price": 568650, "expected_arrival": "2026-10-20", "status": "발주완료", "memo": "리드타임 3일"},
+    {"order_id": "PO-20261008-11", "date": "2026-10-08", "name": "맥링크 줄고리", "barcode": "FLCK00728", "supplier": "Shenzhen Technology", "po_qty": 5000, "unit_price": 21, "total_price": 107040, "expected_arrival": "2026-10-20", "status": "발주완료", "memo": "리드타임 2일"},
+    {"order_id": "PO-20260922-12", "date": "2026-09-22", "name": "스트랩 샘플", "barcode": "FLCK00838", "supplier": "D.y", "po_qty": 1, "unit_price": 17394, "total_price": 17394, "expected_arrival": "2026-10-01", "status": "발주완료", "memo": "리드타임 0일"},
+    {"order_id": "PO-20260921-13", "date": "2026-09-21", "name": "얼티밋 18pro", "barcode": "FLCK00867", "supplier": "Beelan", "po_qty": 100, "unit_price": 3746, "total_price": 374640, "expected_arrival": "2026-10-07", "status": "발주완료", "memo": "리드타임 7일"},
+    {"order_id": "PO-20260921-14", "date": "2026-09-21", "name": "매트쉴드 fold8 U", "barcode": "FLCK00902", "supplier": "Swist", "po_qty": 150, "unit_price": 6690, "total_price": 1003500, "expected_arrival": "2026-10-07", "status": "발주완료", "memo": "리드타임 7일"},
+    {"order_id": "PO-20260921-15", "date": "2026-09-21", "name": "매트쉴드 fold8", "barcode": "FLCK00902", "supplier": "Swist", "po_qty": 600, "unit_price": 6690, "total_price": 4014000, "expected_arrival": "2026-10-07", "status": "발주완료", "memo": "리드타임 7일"},
+    {"order_id": "PO-20260921-16", "date": "2026-09-21", "name": "매트쉴드 fold7", "barcode": "FLCK00895", "supplier": "Swist", "po_qty": 200, "unit_price": 6690, "total_price": 1338000, "expected_arrival": "2026-10-07", "status": "발주완료", "memo": "리드타임 7일"},
+    {"order_id": "PO-20260921-17", "date": "2026-09-21", "name": "맥세이프파우치", "barcode": "FLCK00755", "supplier": "Mixi Bags", "po_qty": 100, "unit_price": 6021, "total_price": 602100, "expected_arrival": "2026-10-08", "status": "발주완료", "memo": "리드타임 8일"},
+    {"order_id": "PO-20261014-18", "date": "2026-10-14", "name": "맥링크프로 블랙", "barcode": "FLCK00894", "supplier": "Aiweile", "po_qty": 1000, "unit_price": 11105, "total_price": 11105400, "expected_arrival": "2026-11-14", "status": "발주완료", "memo": "신규 발주"},
+    {"order_id": "PO-20261008-19", "date": "2026-10-08", "name": "맥링크프로 실버", "barcode": "FLCK00746", "supplier": "Aiweile", "po_qty": 1000, "unit_price": 11105, "total_price": 11105400, "expected_arrival": "2026-11-27", "status": "발주완료", "memo": "리드타임 41일"},
+    {"order_id": "PO-20261008-20", "date": "2026-10-08", "name": "맥링크프로 블랙", "barcode": "FLCK00894", "supplier": "Aiweile", "po_qty": 2000, "unit_price": 11105, "total_price": 22210800, "expected_arrival": "2026-11-27", "status": "발주완료", "memo": "리드타임 41일"},
+    {"order_id": "PO-20260922-21", "date": "2026-09-22", "name": "맥링크프로 실버", "barcode": "FLCK00746", "supplier": "Aiweile", "po_qty": 1000, "unit_price": 11105, "total_price": 11105400, "expected_arrival": "2026-11-03", "status": "발주완료", "memo": "리드타임 32일"},
+    {"order_id": "PO-20260922-22", "date": "2026-09-22", "name": "맥링크프로 블랙", "barcode": "FLCK00894", "supplier": "Aiweile", "po_qty": 1500, "unit_price": 11105, "total_price": 16658100, "expected_arrival": "2026-11-02", "status": "발주완료", "memo": "리드타임 30일"},
+    {"order_id": "PO-20260916-23", "date": "2026-09-16", "name": "옥토락프로", "barcode": "FLCK00659", "supplier": "Jiaqumo", "po_qty": 2500, "unit_price": 5402, "total_price": 13507110, "expected_arrival": "2026-10-29", "status": "발주완료", "memo": "리드타임 34일"},
+    {"order_id": "PO-20260916-24", "date": "2026-09-16", "name": "매트원 DUO", "barcode": "FLCK00867", "supplier": "Lumei", "po_qty": 100, "unit_price": 3077, "total_price": 307740, "expected_arrival": "2026-10-02", "status": "발주완료", "memo": "리드타임 7일"},
+    {"order_id": "PO-20260916-25", "date": "2026-09-16", "name": "매트원 18pro max", "barcode": "FLCK00867", "supplier": "Lumei", "po_qty": 50, "unit_price": 2542, "total_price": 127110, "expected_arrival": "2026-10-02", "status": "발주완료", "memo": "리드타임 7일"}
+]
+
 
 # =========================================================
-# 2. 데이터 입출력 함수 (안전장치 포함)
+# 2. 데이터 입출력 함수 (영구 복구안전장치 포함)
 # =========================================================
 def load_master_data():
     if os.path.exists(MASTER_FILE):
@@ -157,10 +186,13 @@ def load_po_history():
     if os.path.exists(HISTORY_FILE):
         try:
             with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+                if data:
+                    return data
         except Exception:
-            return []
-    return []
+            pass
+    save_po_history(DEFAULT_HISTORY)
+    return DEFAULT_HISTORY
 
 def save_po_history(history):
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
@@ -181,7 +213,7 @@ def save_memo_data(memos):
 
 def send_slack_notification(webhook_url, message_text):
     if not webhook_url:
-        return False, "슬랙 Webhook URL이 설정되지 않았습니다."
+        return False, "슬랙 웹훅 URL이 설정되지 않았습니다."
     try:
         resp = requests.post(
             webhook_url,
@@ -576,7 +608,7 @@ def render_monthly_calendar_html(year, month, events_by_date, filter_types):
 
 
 # =========================================================
-# 4. 사이드바 설정 (데이터 백업/복구 패널 추가)
+# 4. 사이드바 설정
 # =========================================================
 products = load_master_data()
 po_history = load_po_history()
@@ -606,10 +638,8 @@ with st.sidebar:
                     st.success("저장 완료!")
                     st.rerun()
                     
-        # 🛡️ 데이터 백업 및 복구 도구 (관리자 전용)
         with st.expander("💾 데이터 백업 및 복구"):
             st.caption("서버 리부팅 대비 데이터 백업/복구")
-            # 백업 다운로드
             backup_payload = {
                 "master": products,
                 "history": po_history,
@@ -622,7 +652,6 @@ with st.sidebar:
                 mime="application/json",
                 use_container_width=True
             )
-            # 복구 업로드
             uploaded_backup = st.file_uploader("📤 백업 JSON 파일로 복원", type=["json"])
             if uploaded_backup is not None:
                 try:
@@ -1033,9 +1062,9 @@ with tab_master:
                 "supplier": "거래처",
                 "lead_time": st.column_config.NumberColumn("기본 리드타임(일)", min_value=1, max_value=120),
                 "moq": st.column_config.NumberColumn("MOQ", min_value=1, step=50),
-                "unit_price": st.column_config.NumberColumn("매입단가(원)", min_value=0, format="%d원"),
+                "unit_price": st.column_config.NumberColumn("매입단가(원)", format="%d원"),
                 "stock": st.column_config.NumberColumn("현재고", min_value=0),
-                "daily_sales": st.column_config.NumberColumn("일평균판매량", min_value=0.0, format="%.1f"),
+                "daily_sales": st.column_config.NumberColumn("일평균판매량", format="%.1f"),
                 "status": st.column_config.SelectboxColumn("운영상태", options=["정상", "일시품절", "단종"])
             },
             key="master_editor"
