@@ -103,7 +103,7 @@ def safe_float(val, default=0.0):
 
 
 # =========================================================
-# 1-2. 파일 및 표 파싱 유틸리티 (노션 CSV / 이지어드민 호환)
+# 1-2. 파일 및 표 파싱 유틸리티 (노션 CSV 스마트 매칭 지원)
 # =========================================================
 class SpreadsheetXMLParser(HTMLParser):
     def __init__(self):
@@ -244,6 +244,47 @@ def parse_pasted_table_text(raw_text):
     padded = [r + [""] * (max_cols - len(r)) for r in parsed_rows]
     df = pd.DataFrame(padded)
     return promote_header_row(df)
+
+
+def smart_match_product_name(notion_name, master_products):
+    """노션의 항목명(예: 맥링크_실버, 360턴스탠드_블랙)을 마스터 상품과 지능적으로 매칭"""
+    n_clean = re.sub(r'[\s\[\]\-_/]+', '', notion_name).lower()
+    
+    # 1단계: 정확히 정규화된 문자열 비교
+    for item in master_products:
+        m_name = str(item.get("name", ""))
+        m_clean = re.sub(r'[\s\[\]\-_/]+', '', m_name).lower()
+        if n_clean == m_clean:
+            return item
+
+    # 2단계: 핵심 키워드(제품군 + 색상) 매칭
+    # 색상 매핑 사전
+    color_map = {
+        '실버': ['silver', '실버'], '블랙': ['black', '블랙'], '그린': ['green', '그린'],
+        '브라운': ['brown', '브라운'], '오렌지': ['orange', '오렌지'], '화이트': ['white', '화이트']
+    }
+    
+    detected_color = None
+    for kor_col, keywords in color_map.items():
+        if kor_col in notion_name.lower() or any(k in notion_name.lower() for k in keywords):
+            detected_color = kor_col
+            break
+
+    # 제품군 키워드 추출 (맥링크, 턴스탠드, 옥토락, 매트쉴드, 매트원, 에임 등)
+    product_base = re.sub(r'[_\s\-]+.*', '', notion_name).lower()
+
+    for item in master_products:
+        m_name = str(item.get("name", "")).lower()
+        # 제품명이 포함되고, 색상이 일치하는 경우
+        base_match = any(b in m_name for b in [product_base, notion_name.lower()[:3]])
+        if base_match:
+            if detected_color:
+                if any(k in m_name for k in color_map.get(detected_color, [detected_color])):
+                    return item
+            else:
+                return item
+
+    return None
 
 
 def get_config():
@@ -987,68 +1028,55 @@ with st.sidebar:
     st.divider()
 
     # =========================================================
-    # 💡 노션 CSV 파일 업로드 및 표 복사-붙여넣기 연동 패널
+    # 💡 노션 CSV 파일 스마트 업로드 및 복사 연동 패널
     # =========================================================
     st.subheader("📥 재고 데이터 연동 (노션 CSV / 복사)")
     
-    sync_mode = st.radio("동기화 방식 선택", ["📁 노션/엑셀 파일 업로드", "📋 표 복사-붙여넣기"], horizontal=True, label_visibility="collapsed")
+    sync_mode = st.radio("동기화 방식 선택", ["📁 노션 CSV 파일 업로드", "📋 표 복사-붙여넣기"], horizontal=True, label_visibility="collapsed")
 
-    if sync_mode == "📁 노션/엑셀 파일 업로드":
+    if sync_mode == "📁 노션 CSV 파일 업로드":
         uploaded_file = st.file_uploader(
-            "노션 내보내기 CSV / 엑셀 파일 (.csv / .xlsx / .xls)",
-            type=["csv", "xlsx", "xls", "html", "htm"]
+            "노션 내보내기 CSV / 엑셀 파일 (.csv / .xlsx)",
+            type=["csv", "xlsx", "xls"]
         )
         if uploaded_file is not None:
             try:
                 df_f = parse_inventory_file(uploaded_file)
                 cols = list(df_f.columns)
 
-                # 노션 CSV 컬럼 매핑 자동 탐색 (항목명/상품명, 제품 재고, 1주판매 등)
                 auto_name = next((c for c in cols if any(k in c for k in ["항목명", "상품명", "품목명"])), cols[0])
                 auto_stock = next((c for c in cols if any(k in c for k in ["제품 재고", "현재고", "가용재고", "재고"])), cols[1] if len(cols) > 1 else cols[0])
                 auto_sales = next((c for c in cols if any(k in c for k in ["1주판매", "금일판매", "판매량"])), None)
 
                 st.caption(f"✅ 파일 분석 성공! ({len(df_f)}행 감지)")
-                sel_name_col = st.selectbox("품목명 컬럼", cols, index=cols.index(auto_name) if auto_name in cols else 0, key="up_name")
-                sel_stock_col = st.selectbox("재고 수량 컬럼", cols, index=cols.index(auto_stock) if auto_stock in cols else 0, key="up_stock")
+                sel_name_col = st.selectbox("품목명 컬럼 (항목명)", cols, index=cols.index(auto_name) if auto_name in cols else 0, key="up_name")
+                sel_stock_col = st.selectbox("재고 수량 컬럼 (제품 재고)", cols, index=cols.index(auto_stock) if auto_stock in cols else 0, key="up_stock")
 
-                if st.button("🔄 파일 데이터로 현재고 동기화", type="primary", use_container_width=True, key="file_sync_btn"):
-                    import_map = {}
+                if st.button("🔄 노션 CSV 데이터로 현재고 동기화", type="primary", use_container_width=True, key="file_sync_btn"):
+                    updated_cnt = 0
                     for _, r in df_f.iterrows():
-                        name_val = str(r[sel_name_col]).strip()
+                        notion_name = str(r[sel_name_col]).strip()
                         stock_val = safe_int(r[sel_stock_col])
                         sales_val = safe_float(r[auto_sales]) if (auto_sales and auto_sales in df_f.columns) else None
-                        if name_val:
-                            import_map[name_val] = {"stock": stock_val, "sales": sales_val}
 
-                    updated_cnt = 0
-                    for item in products:
-                        iname = str(item.get("name", "")).strip()
-                        # 이름 또는 바코드로 매칭 시도
-                        matched = import_map.get(iname)
-                        if not matched:
-                            # 괄호나 공백을 제거하고 부분 일치 확인
-                            for n_key, info in import_map.items():
-                                if iname in n_key or n_key in iname:
-                                    matched = info
-                                    break
-                        if matched:
-                            item["stock"] = matched["stock"]
-                            if matched["sales"] is not None and matched["sales"] > 0:
-                                # 1주 판매량인 경우 일평균으로 환산
+                        # 스마트 매칭 함수 호출
+                        matched_item = smart_match_product_name(notion_name, products)
+                        if matched_item:
+                            matched_item["stock"] = stock_val
+                            if sales_val is not None and sales_val > 0:
                                 div_days = 7 if (auto_sales and "1주" in auto_sales) else 1
-                                item["daily_sales"] = round(matched["sales"] / div_days, 1)
+                                matched_item["daily_sales"] = round(sales_val / div_days, 1)
                             updated_cnt += 1
 
                     save_master_data(products)
                     bump_editor_version()
-                    st.success(f"총 {updated_cnt}개 품목 현재고 동기화 완료!")
+                    st.success(f"총 {updated_cnt}개 품목 현재고 및 판매량 스마트 동기화 완료!")
                     st.rerun()
             except Exception as e:
                 st.error(f"파일 분석 오류: {e}")
 
     else:
-        st.caption("노션이나 이지어드민 표를 복사(Ctrl+C)한 뒤 아래 칸에 붙여넣기(Ctrl+V) 하세요.")
+        st.caption("노션 표 전체를 마우스로 복사(Ctrl+C)한 뒤 아래 칸에 붙여넣기(Ctrl+V) 하세요.")
         pasted_text = st.text_area(
             "여기에 표 붙여넣기 (Ctrl+V)",
             placeholder="항목명\t제품 재고\t1주판매\n맥링크_실버\t672\t169",
@@ -1069,19 +1097,14 @@ with st.sidebar:
                 sel_stock_col = st.selectbox("재고 수량 컬럼", cols, index=cols.index(auto_stock) if auto_stock in cols else 0, key="paste_stock")
 
                 if st.button("🔄 붙여넣은 표로 현재고 동기화", type="primary", use_container_width=True, key="paste_sync_btn"):
-                    import_map = {}
-                    for _, r in df_pasted.iterrows():
-                        name_val = str(r[sel_name_col]).strip()
-                        stock_val = safe_int(r[sel_stock_col])
-                        if name_val:
-                            import_map[name_val] = stock_val
-
                     updated_cnt = 0
-                    for item in products:
-                        iname = str(item.get("name", "")).strip()
-                        matched_stock = import_map.get(iname)
-                        if matched_stock is not None:
-                            item["stock"] = matched_stock
+                    for _, r in df_pasted.iterrows():
+                        notion_name = str(r[sel_name_col]).strip()
+                        stock_val = safe_int(r[sel_stock_col])
+
+                        matched_item = smart_match_product_name(notion_name, products)
+                        if matched_item:
+                            matched_item["stock"] = stock_val
                             updated_cnt += 1
 
                     save_master_data(products)
@@ -1411,7 +1434,6 @@ with tab_master:
     df_master = pd.DataFrame(products)
 
     if is_admin:
-        edited_master = pd.DataFrame(products)
         edited_master = st.data_editor(
             df_master,
             num_rows="dynamic",
