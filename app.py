@@ -135,7 +135,7 @@ DEFAULT_PRODUCTS = [
 
 
 # =========================================================
-# 2. 데이터 입출력 함수 (자동 생성 안전장치 포함)
+# 2. 데이터 입출력 함수 (안전장치 포함)
 # =========================================================
 def load_master_data():
     if os.path.exists(MASTER_FILE):
@@ -160,7 +160,6 @@ def load_po_history():
                 return json.load(f)
         except Exception:
             return []
-    save_po_history([])
     return []
 
 def save_po_history(history):
@@ -174,7 +173,6 @@ def load_memo_data():
                 return json.load(f)
         except Exception:
             return {}
-    save_memo_data({})
     return {}
 
 def save_memo_data(memos):
@@ -578,7 +576,7 @@ def render_monthly_calendar_html(year, month, events_by_date, filter_types):
 
 
 # =========================================================
-# 4. 사이드바 설정
+# 4. 사이드바 설정 (데이터 백업/복구 패널 추가)
 # =========================================================
 products = load_master_data()
 po_history = load_po_history()
@@ -607,6 +605,39 @@ with st.sidebar:
                     save_custom_webhook(new_wh.strip())
                     st.success("저장 완료!")
                     st.rerun()
+                    
+        # 🛡️ 데이터 백업 및 복구 도구 (관리자 전용)
+        with st.expander("💾 데이터 백업 및 복구"):
+            st.caption("서버 리부팅 대비 데이터 백업/복구")
+            # 백업 다운로드
+            backup_payload = {
+                "master": products,
+                "history": po_history,
+                "memos": memo_data
+            }
+            st.download_button(
+                "📥 전체 데이터 백업 다운로드",
+                data=json.dumps(backup_payload, ensure_ascii=False, indent=2),
+                file_name=f"flickrfox_backup_{date.today().strftime('%Y%m%d')}.json",
+                mime="application/json",
+                use_container_width=True
+            )
+            # 복구 업로드
+            uploaded_backup = st.file_uploader("📤 백업 JSON 파일로 복원", type=["json"])
+            if uploaded_backup is not None:
+                try:
+                    b_data = json.load(uploaded_backup)
+                    if "master" in b_data and "history" in b_data:
+                        save_master_data(b_data["master"])
+                        save_po_history(b_data["history"])
+                        if "memos" in b_data:
+                            save_memo_data(b_data["memos"])
+                        st.success("데이터가 성공적으로 복원되었습니다!")
+                        st.rerun()
+                    else:
+                        st.error("올바른 백업 파일 형식이 아닙니다.")
+                except Exception as e:
+                    st.error(f"복원 오류: {e}")
     else:
         if admin_pw_input:
             st.error("비밀번호 불일치")
