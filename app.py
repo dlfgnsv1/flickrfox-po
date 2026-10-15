@@ -65,7 +65,7 @@ def get_admin_password():
             return st.secrets["ADMIN_PASSWORD"]
     except Exception:
         pass
-    return os.environ.get("ADMIN_PASSWORD", "flickrfox")
+    return os.environ.get("ADMIN_PASSWORD", "fox1989@@")
 
 def get_slack_webhook_url():
     try:
@@ -678,9 +678,12 @@ tab_calendar, tab_dashboard, tab_history, tab_master = st.tabs([
 
 
 # ---------------------------------------------------------
-# [TAB 1] 📅 재고·입고 캘린더 (요약 카드와 상단 배치 개편)
+# [TAB 1] 📅 재고·입고 캘린더 (요약 최우선 배치)
 # ---------------------------------------------------------
 with tab_calendar:
+    # 날짜 선언을 탭 맨 위로 이동하여 NameError 방지
+    today = date.today()
+
     events_by_date, out_of_stock_list, stockout_soon_list, upcoming_arrivals, delayed_arrivals = (
         build_calendar_events(products, po_history, memo_data, sales_multiplier)
     )
@@ -765,7 +768,7 @@ with tab_calendar:
     with st.expander("📝 캘린더 날짜별 운영 특이사항 및 입고 지연 메모 등록하기"):
         c_m1, c_m2, c_m3 = st.columns([1.5, 2.5, 1])
         with c_m1:
-            memo_date_sel = st.date_input("메모 적용 날짜", value=date.today(), key="memo_dt_cal")
+            memo_date_sel = st.date_input("메모 적용 날짜", value=today, key="memo_dt_cal")
         with c_m2:
             memo_text_input = st.text_input("특이사항 입력", placeholder="예: 택배사 파업 출고 지연, 빅프로모션 광고비 증액 등", key="memo_txt_cal")
         with c_m3:
