@@ -157,6 +157,7 @@ DEFAULT_HISTORY = [
     {"order_id": "PO-20260916-25", "date": "2026-09-16", "name": "매트원 18pro max", "barcode": "FLCK00867", "supplier": "Lumei", "po_qty": 50, "unit_price": 2542, "total_price": 127110, "expected_arrival": "2026-10-02", "status": "발주완료", "memo": "리드타임 7일"}
 ]
 
+
 # =========================================================
 # 2. 메모리(Session State) 기반 영구 데이터 관리 함수
 # =========================================================
@@ -170,7 +171,6 @@ def save_master_data(data):
 
 def load_po_history():
     if "po_history" not in st.session_state:
-        # 과거 도착일이 지난 건은 자동으로 '입고완료' 처리
         today_str = date.today().strftime("%Y-%m-%d")
         history = list(DEFAULT_HISTORY)
         for po in history:
@@ -210,7 +210,7 @@ def safe_float(val, default=0.0):
 
 def send_slack_notification(webhook_url, message_text):
     if not webhook_url:
-        return False, "슬랙 웹훅 URL이 설정되지 않았습니다."
+        return False, "슬랙 Webhook URL이 설정되지 않았습니다."
     try:
         resp = requests.post(
             webhook_url,
@@ -639,7 +639,7 @@ with st.sidebar:
                     st.rerun()
                     
         with st.expander("💾 데이터 백업 및 복구"):
-            st.caption("메모리 기반 백업/복구 (세션 영구 보존)")
+            st.caption("세션 메모리 백업 및 복구")
             backup_payload = {
                 "master": products,
                 "history": po_history,
@@ -662,7 +662,7 @@ with st.sidebar:
                         if "memos" in b_data:
                             save_memo_data(b_data["memos"])
                         st.success("데이터가 성공적으로 복원되었습니다!")
-                        st.rerun()
+                        st.rerun() # 💡 복원 직후 즉시 화면 갱신 반영
                     else:
                         st.error("올바른 백업 파일 형식이 아닙니다.")
                 except Exception as e:
