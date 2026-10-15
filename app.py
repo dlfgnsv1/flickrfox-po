@@ -74,6 +74,22 @@ CONFIG_FILE = "local_config.json"
 
 ADMIN_PASSWORD = "fox1989@@"
 
+def safe_int(val, default=0):
+    try:
+        if val is None or val == "":
+            return default
+        return int(float(str(val).replace(",", "").replace("원", "").replace("개", "").strip()))
+    except Exception:
+        return default
+
+def safe_float(val, default=0.0):
+    try:
+        if val is None or val == "":
+            return default
+        return float(str(val).replace(",", "").strip())
+    except Exception:
+        return default
+
 def get_slack_webhook_url():
     try:
         if "SLACK_WEBHOOK_URL" in st.secrets:
@@ -133,7 +149,6 @@ DEFAULT_PRODUCTS = [
     {"name": "[SHIFT-GO]", "barcode": "FLCK00856", "supplier": "Landscape", "lead_time": 30, "moq": 500, "unit_price": 8000, "stock": 0, "daily_sales": 0.0, "status": "정상"}
 ]
 
-# 캡처 화면 기반 초기 발주 히스토리 데이터
 DEFAULT_HISTORY = [
     {"order_id": "PO-20261013-01", "date": "2026-10-13", "name": "맥링크 미니 샘플", "barcode": "FLCK00894", "supplier": "Aiweile", "po_qty": 1, "unit_price": 50844, "total_price": 50844, "expected_arrival": "2026-11-05", "status": "발주완료", "memo": "리드타임 14일"},
     {"order_id": "PO-20261012-02", "date": "2026-10-12", "name": "매트쉴드 fold8", "barcode": "FLCK00902", "supplier": "Swist", "po_qty": 200, "unit_price": 6690, "total_price": 1338000, "expected_arrival": "2026-10-26", "status": "발주완료", "memo": "리드타임 3일"},
@@ -164,7 +179,7 @@ DEFAULT_HISTORY = [
 
 
 # =========================================================
-# 2. 데이터 입출력 함수 (예상 도착일 경과 건 자동 '입고완료' 처리 포함)
+# 2. 데이터 입출력 함수 (안전장치 포함)
 # =========================================================
 def load_master_data():
     if os.path.exists(MASTER_FILE):
@@ -194,13 +209,11 @@ def load_po_history():
     if not history:
         history = DEFAULT_HISTORY
 
-    # 💡 핵심 로직: 오늘 날짜 기준으로 예상 도착일이 지난 건은 자동으로 '입고완료' 처리
     today_str = date.today().strftime("%Y-%m-%d")
     updated = False
     for po in history:
         status = str(po.get("status", "발주완료"))
         arr_date = str(po.get("expected_arrival", ""))[:10]
-        # 아직 입고완료가 아니고, 취소/반품이 아니며, 예상 도착일이 오늘보다 과거인 경우
         if arr_date and arr_date < today_str and status not in ["입고완료", "취소", "반품"]:
             po["status"] = "입고완료"
             updated = True
@@ -255,7 +268,7 @@ def get_pending_po_map(po_history):
         if status in ["입고완료", "취소", "반품"]:
             continue
         bc = str(po.get("barcode", "")).strip()
-        qty = int(po.get("po_qty", 0) or 0)
+        qty = safe_int(po.get("po_qty", 0))
         arr = str(po.get("expected_arrival", ""))[:10]
         if bc:
             pending_qty[bc] = pending_qty.get(bc, 0) + qty
@@ -277,12 +290,12 @@ def calculate_reorder_table(products, po_history, holiday_buffer, target_days, s
         bc = str(item.get("barcode", "")).strip()
         name = item.get("name", "")
         supplier = item.get("supplier", "")
-        lead_time = int(item.get("lead_time", 14) or 14)
-        moq = int(item.get("moq", 500) or 500)
-        unit_price = int(item.get("unit_price", 0) or 0)
-        stock = int(item.get("stock", 0) or 0)
+        lead_time = safe_int(item.get("lead_time", 14), 14)
+        moq = safe_int(item.get("moq", 500), 500)
+        unit_price = safe_int(item.get("unit_price", 0), 0)
+        stock = safe_int(item.get("stock", 0), 0)
         
-        base_sales = float(item.get("daily_sales", 0.0) or 0.0)
+        base_sales = safe_float(item.get("daily_sales", 0.0), 0.0)
         adjusted_sales = round(base_sales * sales_multiplier, 1)
 
         incoming_qty = pending_qty_map.get(bc, 0)
@@ -384,9 +397,12 @@ def build_calendar_events(products, po_history, memo_data, sales_multiplier):
         name = po.get("name", "미상 품목")
         bc = str(po.get("barcode", "")).strip()
         supplier = po.get("supplier", "")
-        qty = int(po.get("po_qty", 0) or 0)
-        unit_price = int(po.get("unit_price", 0) or 0)
-        total_price = int(po.get("total_price", qty * unit_price) or 0)
+        qty = safe_int(po.get("po_qty", 0))
+        unit_price = safe_int(po.get("unit_price", 0))
+        total_price = safe_int(po.get("total_price", 0))
+        if total_price == 0:
+            total_price = qty * unit_price
+
         arr_str = str(po.get("expected_arrival", ""))[:10]
         order_date = str(po.get("date", ""))[:10]
 
@@ -424,8 +440,8 @@ def build_calendar_events(products, po_history, memo_data, sales_multiplier):
 
         name = item.get("name", "")
         bc = str(item.get("barcode", "")).strip()
-        stock = int(item.get("stock", 0) or 0)
-        base_sales = float(item.get("daily_sales", 0.0) or 0.0)
+        stock = safe_int(item.get("stock", 0), 0)
+        base_sales = safe_float(item.get("daily_sales", 0.0), 0.0)
         adjusted_sales = round(base_sales * sales_multiplier, 1)
 
         next_po = earliest_arrival_map.get(bc)
