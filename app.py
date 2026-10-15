@@ -103,7 +103,7 @@ def safe_float(val, default=0.0):
 
 
 # =========================================================
-# 1-2. 노션 CSV 파싱 및 명시적 1:1 매핑 엔진
+# 1-2. 노션 CSV 파싱 및 정확한 1:1 고정 매핑 엔진
 # =========================================================
 def parse_inventory_csv(uploaded_file):
     raw_bytes = uploaded_file.getvalue()
@@ -131,7 +131,7 @@ def parse_inventory_csv(uploaded_file):
     return pd.read_csv(uploaded_file, encoding="utf-8-sig")
 
 
-# 노션 항목명과 앱 내 마스터 상품명 간의 고정 1:1 매핑 테이블
+# 노션 항목명과 앱 내 마스터 상품명 간의 엄격한 1:1 고정 매핑 테이블
 NOTION_EXACT_MAP = {
     "맥링크_실버": "[Mag-Link PRO] Silver",
     "맥링크_블랙": "[Mag-Link PRO] Black",
@@ -168,19 +168,17 @@ def smart_match_and_sync(df_notion, products):
         if not name_raw or name_raw == "nan":
             continue
             
-        stock_val = safe_int(row.get("제품 재고", 0))
+        stock_raw = row.get("제품 재고")
+        # 재고 수량이 비어있는 행(상정카 등 패키지/부자재 데이터)은 무조건 스킵하여 오작동 방지
+        if pd.isna(stock_raw) or str(stock_raw).strip() == "":
+            continue
+
+        stock_val = safe_int(stock_raw)
         sales_1w = safe_float(row.get("1주판매", 0.0))
         daily_sales_val = round(sales_1w / 7.0, 1) if sales_1w > 0 else 0.0
 
-        # 매핑 테이블에서 일치하는 앱 상품명 찾기
+        # 엄격하게 맵핑된 대상 상품명만 적용
         target_master_name = NOTION_EXACT_MAP.get(name_raw)
-        
-        # 만약 매핑 테이블에 없다면 유사어 검색
-        if not target_master_name:
-            for k, v in NOTION_EXACT_MAP.items():
-                if k in name_raw or name_raw in k:
-                    target_master_name = v
-                    break
 
         if target_master_name and target_master_name in product_dict:
             target_item = product_dict[target_master_name]
@@ -933,7 +931,7 @@ with st.sidebar:
     st.divider()
 
     # =========================================================
-    # 💡 노션 CSV 파일 1:1 고정 매핑 연동 패널
+    # 💡 노션 CSV 파일 1:1 완벽 고정 매핑 연동 패널
     # =========================================================
     st.subheader("📥 노션 CSV 재고 연동")
     uploaded_notion_csv = st.file_uploader(
