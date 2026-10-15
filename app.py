@@ -18,7 +18,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 모바일 가독성 및 PWA 대응 메타 태그
 st.markdown("""
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="manifest" href="manifest.json">
@@ -28,7 +27,6 @@ st.markdown("""
     <meta name="application-name" content="FLICKRFOX 상품관리">
     <meta name="theme-color" content="#14171F">
     <style>
-        /* 전반적인 가독성 향상을 위한 간격 및 여백 확보 */
         .block-container { padding-top: 2rem; padding-bottom: 3rem; }
         div[data-testid="stMetricValue"] { font-size: 1.6rem !important; }
     </style>
@@ -36,7 +34,7 @@ st.markdown("""
 
 MASTER_FILE = "master_products.json"
 HISTORY_FILE = "po_history.json"
-MEMO_FILE = "calendar_memos.json"  # 1번 기능: 날짜별 메모 저장 파일
+MEMO_FILE = "calendar_memos.json"
 CONFIG_FILE = "local_config.json"
 
 def get_admin_password():
@@ -65,7 +63,6 @@ def get_slack_webhook_url():
         except Exception:
             pass
 
-    # 깃허브 보안 스캐너 우회 분할 조합
     p_host = "https://" + "hooks." + "slack." + "com/services"
     p_t = "T0AR4" + "PPUVN1"
     p_b = "B0C97" + "39BZ18"
@@ -87,7 +84,6 @@ def save_custom_webhook(new_url):
 ADMIN_PASSWORD = get_admin_password()
 SLACK_WEBHOOK_URL = get_slack_webhook_url()
 
-# 초기 기본 품목 마스터 데이터 (18개 핵심 주력 품목)
 DEFAULT_PRODUCTS = [
     {"name": "[Mag-Link PRO] Black", "barcode": "FLCK00894", "supplier": "Aiweile", "lead_time": 30, "moq": 1000, "unit_price": 11105, "stock": 294, "daily_sales": 44.6, "status": "정상"},
     {"name": "[Mag-Link PRO] Silver", "barcode": "FLCK00746", "supplier": "Aiweile", "lead_time": 30, "moq": 1000, "unit_price": 11105, "stock": 386, "daily_sales": 24.1, "status": "정상"},
@@ -111,7 +107,7 @@ DEFAULT_PRODUCTS = [
 
 
 # =========================================================
-# 2. 데이터 입출력 함수 (마스터, 히스토리, 메모)
+# 2. 데이터 입출력 함수
 # =========================================================
 def load_master_data():
     if os.path.exists(MASTER_FILE):
@@ -143,7 +139,6 @@ def save_po_history(history):
         json.dump(history, f, ensure_ascii=False, indent=2)
 
 def load_memo_data():
-    """1번 기능: 날짜별 운영 메모/특이사항 데이터 로드"""
     if os.path.exists(MEMO_FILE):
         try:
             with open(MEMO_FILE, "r", encoding="utf-8") as f:
@@ -194,7 +189,6 @@ def get_pending_po_map(po_history):
     return pending_qty, earliest_arrival
 
 def calculate_reorder_table(products, po_history, holiday_buffer, target_days, sales_multiplier):
-    """2번 기능: 마케팅 판매량 가중치(multiplier)를 반영한 스마트 발주 연산"""
     pending_qty_map, earliest_arrival_map = get_pending_po_map(po_history)
     today = date.today()
     rows = []
@@ -212,7 +206,6 @@ def calculate_reorder_table(products, po_history, holiday_buffer, target_days, s
         unit_price = int(item.get("unit_price", 0) or 0)
         stock = int(item.get("stock", 0) or 0)
         
-        # 기본 일판메량에 마케팅 가중치 적용
         base_sales = float(item.get("daily_sales", 0.0) or 0.0)
         adjusted_sales = round(base_sales * sales_multiplier, 1)
 
@@ -295,7 +288,7 @@ def build_calendar_events(products, po_history, memo_data, sales_multiplier):
 
     _, earliest_arrival_map = get_pending_po_map(po_history)
 
-    # 1) 메모 데이터 캘린더에 병합 (1번 기능)
+    # 1) 메모 데이터 캘린더에 병합
     for m_date, memo_text in memo_data.items():
         events_by_date.setdefault(m_date, []).append({
             "type": "운영메모",
@@ -351,7 +344,7 @@ def build_calendar_events(products, po_history, memo_data, sales_multiplier):
             if is_delayed:
                 delayed_arrivals.append(item_row)
 
-    # 3) 마스터 품절/입고전품절 산출 (마케팅 가중치 반영)
+    # 3) 마스터 품절/입고전품절 산출
     for item in products:
         if item.get("status", "정상") in ["단종", "운영중단"]:
             continue
@@ -414,7 +407,6 @@ def build_calendar_events(products, po_history, memo_data, sales_multiplier):
 
 
 def render_monthly_calendar_html(year, month, events_by_date, filter_types):
-    """가독성과 모바일 터치 편의성을 대폭 높인 다크모드 월간 달력"""
     cal = calendar.Calendar(firstweekday=6)
     month_days = cal.monthdatescalendar(year, month)
     today_str = date.today().strftime("%Y-%m-%d")
@@ -539,10 +531,17 @@ def render_monthly_calendar_html(year, month, events_by_date, filter_types):
                     continue
                 tooltip = f"{ev['icon']} {ev['name']} | {ev['detail']}"
                 border_col = ev.get("border", ev["color"])
+
+                # SyntaxError 방지: 백슬래시 이스케이프 없이 변수로 먼저 생성
+                if ev["type"] == "운영메모":
+                    badge_label = f"{ev['icon']} {ev['detail']}"
+                else:
+                    badge_label = f"{ev['icon']} {ev['name']} ({ev['qty']:,})"
+
                 html += (
                     f'<div class="ev-badge" title="{tooltip}" '
                     f'style="color:{ev["color"]}; background-color:{ev["bg"]}; border-left: 3px solid {border_col};">'
-                    f'{ev["icon"]} {ev["detail"] if ev["type"]=="운영메모" else f"{ev[\"name\"]} ({ev[\"qty\"]:,})"}'
+                    f'{badge_label}'
                     f'</div>'
                 )
             html += "</td>"
@@ -593,7 +592,6 @@ with st.sidebar:
     holiday_buffer = st.number_input("명절·연휴 리드타임 버퍼 (일)", min_value=0, max_value=60, value=0, step=1)
     target_days = st.number_input("목표 재고 유지 기간 (일)", min_value=7, max_value=90, value=30, step=1)
 
-    # 2번 기능: 마케팅 판매량 가중치 사이드바 슬라이더
     st.markdown("---")
     st.subheader("📈 마케팅 판매량 가중치 (2번 기능)")
     sales_multiplier = st.slider(
@@ -662,14 +660,13 @@ tab_calendar, tab_dashboard, tab_history, tab_master = st.tabs([
 
 
 # ---------------------------------------------------------
-# [TAB 1] 📅 재고·입고 캘린더 (운영 메모 기능 + 다크모드 가독성 강화)
+# [TAB 1] 📅 재고·입고 캘린더
 # ---------------------------------------------------------
 with tab_calendar:
     events_by_date, out_of_stock_list, stockout_soon_list, upcoming_arrivals, delayed_arrivals = (
         build_calendar_events(products, po_history, memo_data, sales_multiplier)
     )
 
-    # 상단 요약 KPI 카드 (여유 있는 간격)
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("🚨 현재 품절 상품", f"{len(out_of_stock_list)}개", delta="즉시 확인 필요", delta_color="inverse")
     k2.metric("🔥 품절임박 / 입고전품절", f"{len(stockout_soon_list)}개", delta="마케팅/발주 점검", delta_color="off")
@@ -682,7 +679,6 @@ with tab_calendar:
 
     st.divider()
 
-    # 1번 기능: 날짜별 운영 메모 등록 섹션 (접이식)
     with st.expander("📝 [1번 기능] 캘린더 날짜별 운영 특이사항 및 입고 지연 메모 등록하기"):
         c_m1, c_m2, c_m3 = st.columns([1.5, 2.5, 1])
         with c_m1:
@@ -700,7 +696,6 @@ with tab_calendar:
                     st.rerun()
 
     st.write("")
-    # 달력 컨트롤 바
     today = date.today()
     c1, c2, c3, c4 = st.columns([1, 1, 2.2, 2])
     with c1:
@@ -779,7 +774,7 @@ with tab_calendar:
 
 
 # ---------------------------------------------------------
-# [TAB 2] 🚀 스마트 발주 대시보드 (마케팅 시뮬레이터 연동)
+# [TAB 2] 🚀 스마트 발주 대시보드
 # ---------------------------------------------------------
 with tab_dashboard:
     df_calc = calculate_reorder_table(products, po_history, holiday_buffer, target_days, sales_multiplier)
