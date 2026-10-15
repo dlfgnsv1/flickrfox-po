@@ -11,7 +11,7 @@ from html.parser import HTMLParser
 from datetime import datetime, date, timedelta
 
 # =========================================================
-# 1. 기본 환경 설정 및 다크모드 강제 고정 설정
+# 1. 기본 환경 설정 및 다크모드 고정
 # =========================================================
 st.set_page_config(
     page_title="FLICKRFOX 상품관리",
@@ -20,7 +20,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Streamlit 전역 테마를 다크모드로 강제 고정하는 설정 추가
 st.markdown("""
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="manifest" href="manifest.json">
@@ -30,7 +29,6 @@ st.markdown("""
     <meta name="application-name" content="FLICKRFOX 상품관리">
     <meta name="theme-color" content="#14171F">
     <style>
-        /* 항상 다크 테마 컬러가 기본 적용되도록 루트 스타일 강제 */
         :root {
             color-scheme: dark;
         }
@@ -105,7 +103,7 @@ def safe_float(val, default=0.0):
 
 
 # =========================================================
-# 1-2. XML 및 HTML/SpreadsheetML 지원 만능 파서
+# 1-2. 파일 및 표 파싱 유틸리티 (노션 CSV / 이지어드민 호환)
 # =========================================================
 class SpreadsheetXMLParser(HTMLParser):
     def __init__(self):
@@ -147,7 +145,7 @@ class SpreadsheetXMLParser(HTMLParser):
             self.curr_cell.append(data)
 
 
-HEADER_KEYWORDS = ["바코드", "상품코드", "상품명", "품목명", "가용재고", "현재고", "정상재고", "재고", "옵션", "공급처"]
+HEADER_KEYWORDS = ["바코드", "상품코드", "상품명", "품목명", "가용재고", "현재고", "정상재고", "재고", "옵션", "공급처", "항목명", "제품 재고"]
 
 def promote_header_row(df):
     df = df.dropna(how="all").reset_index(drop=True)
@@ -188,9 +186,8 @@ def promote_header_row(df):
     return df
 
 
-def parse_easyadmin_file(uploaded_file):
+def parse_inventory_file(uploaded_file):
     raw_bytes = uploaded_file.getvalue()
-    
     text = None
     for enc in ("utf-8-sig", "utf-8", "cp949", "euc-kr"):
         try:
@@ -200,26 +197,6 @@ def parse_easyadmin_file(uploaded_file):
             continue
     if text is None:
         text = raw_bytes.decode("cp949", errors="ignore")
-
-    parser = SpreadsheetXMLParser()
-    parser.feed(text)
-
-    if parser.rows:
-        max_cols = max(len(r) for r in parser.rows)
-        valid_rows = [r + [""] * (max_cols - len(r)) for r in parser.rows if len(r) >= 2]
-        if valid_rows:
-            df_xml = pd.DataFrame(valid_rows)
-            df_xml = promote_header_row(df_xml)
-            if len(df_xml.columns) >= 2 and len(df_xml) > 0:
-                return df_xml
-
-    for eng in ("xlrd", "openpyxl"):
-        try:
-            uploaded_file.seek(0)
-            df_ex = pd.read_excel(uploaded_file, engine=eng)
-            return promote_header_row(df_ex)
-        except Exception:
-            continue
 
     for sep in (",", "\t"):
         for enc in ("utf-8-sig", "cp949", "euc-kr", "utf-8"):
@@ -231,7 +208,24 @@ def parse_easyadmin_file(uploaded_file):
             except Exception:
                 continue
 
-    raise ValueError("표 데이터를 추출할 수 없습니다. 파일 내부에 재고 표가 포함되어 있는지 확인해 주세요.")
+    parser = SpreadsheetXMLParser()
+    parser.feed(text)
+    if parser.rows:
+        max_cols = max(len(r) for r in parser.rows)
+        valid_rows = [r + [""] * (max_cols - len(r)) for r in parser.rows if len(r) >= 2]
+        if valid_rows:
+            df_xml = pd.DataFrame(valid_rows)
+            return promote_header_row(df_xml)
+
+    for eng in ("xlrd", "openpyxl"):
+        try:
+            uploaded_file.seek(0)
+            df_ex = pd.read_excel(uploaded_file, engine=eng)
+            return promote_header_row(df_ex)
+        except Exception:
+            continue
+
+    raise ValueError("파일 내부에 재고 표 데이터를 읽을 수 없습니다.")
 
 
 def parse_pasted_table_text(raw_text):
@@ -252,16 +246,23 @@ def parse_pasted_table_text(raw_text):
     return promote_header_row(df)
 
 
-def get_slack_webhook_url():
+def get_config():
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                cfg = json.load(f)
-                if cfg.get("slack_webhook"):
-                    return cfg.get("slack_webhook")
+                return json.load(f)
         except Exception:
             pass
+    return {}
 
+def save_config(cfg):
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+def get_slack_webhook_url():
+    cfg = get_config()
+    if cfg.get("slack_webhook"):
+        return cfg.get("slack_webhook")
     try:
         if "SLACK_WEBHOOK_URL" in st.secrets:
             return st.secrets["SLACK_WEBHOOK_URL"]
@@ -276,19 +277,8 @@ def get_slack_webhook_url():
     p_k = "77ssi4sP" + "pna3MVDv" + "zqNyZ7La"
     return f"{p_host}/{p_t}/{p_b}/{p_k}"
 
-def save_custom_webhook(new_urls):
-    cfg = {}
-    if os.path.exists(CONFIG_FILE):
-        try:
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                cfg = json.load(f)
-        except Exception:
-            pass
-    cfg["slack_webhook"] = new_urls.strip()
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, ensure_ascii=False, indent=2)
-
 SLACK_WEBHOOK_URL = get_slack_webhook_url()
+
 
 # =========================================================
 # 2. 초기 기본 데이터
@@ -874,6 +864,7 @@ def render_monthly_calendar_html(year, month, events_by_date, filter_types):
 products = load_master_data()
 po_history = load_po_history()
 memo_data = load_memo_data()
+app_config = get_config()
 
 with st.sidebar:
     st.title("🦊 FLICKRFOX")
@@ -894,16 +885,18 @@ with st.sidebar:
         with st.expander("🔔 슬랙 웹훅(Webhook) 다중 채널 설정"):
             st.caption("2개 이상의 채널로 동시에 보내려면 줄바꿈(Enter)이나 쉼표(,)로 구분해서 붙여넣으세요.")
             new_wh = st.text_area(
-                "슬랙 Webhook URL 목록 (다중 입력 가능)",
+                "슬랙 Webhook URL 목록",
                 value=SLACK_WEBHOOK_URL,
                 height=100,
-                placeholder="https://hooks.slack.com/services/... (제품기획)\nhttps://hooks.slack.com/services/... (방미경 PD)"
+                placeholder="https://hooks.slack.com/services/..."
             )
             col_w1, col_w2 = st.columns(2)
             with col_w1:
                 if st.button("💾 웹훅 저장", type="primary", use_container_width=True):
                     if new_wh.strip():
-                        save_custom_webhook(new_wh.strip())
+                        cfg = get_config()
+                        cfg["slack_webhook"] = new_wh.strip()
+                        save_config(cfg)
                         st.success("슬랙 채널 저장 완료!")
                         st.rerun()
             with col_w2:
@@ -917,13 +910,13 @@ with st.sidebar:
         with st.expander("💾 데이터 백업 및 복구", expanded=False):
             st.caption("파일 업로드 없이 바로 복원하거나 JSON 백업본을 덮어쓸 수 있습니다.")
             
-            if st.button("⚡ 엑셀 캡처 원본 데이터로 즉시 복원", type="primary", use_container_width=True):
+            if st.button("⚡ 원본 데이터로 즉시 복원", type="primary", use_container_width=True):
                 restored_master = [dict(x) for x in DEFAULT_PRODUCTS]
                 restored_hist, _ = auto_mark_past_arrivals([dict(x) for x in DEFAULT_HISTORY])
                 save_master_data(restored_master)
                 save_po_history(restored_hist)
                 bump_editor_version()
-                st.toast("✅ 엑셀 원본 데이터(28건 발주 + 마스터)로 완벽 복원되었습니다!")
+                st.toast("✅ 원본 데이터로 완벽 복원되었습니다!")
                 st.rerun()
 
             st.markdown("---")
@@ -994,72 +987,71 @@ with st.sidebar:
     st.divider()
 
     # =========================================================
-    # 💡 파일 업로드 & 복사-붙여넣기 양쪽 모두 지원하는 연동 패널
+    # 💡 노션 CSV 파일 업로드 및 표 복사-붙여넣기 연동 패널
     # =========================================================
-    st.subheader("📥 이지어드민 재고 연동")
+    st.subheader("📥 재고 데이터 연동 (노션 CSV / 복사)")
     
-    sync_mode = st.radio("동기화 방식 선택", ["📋 표 복사-붙여넣기", "📁 파일 업로드"], horizontal=True, label_visibility="collapsed")
+    sync_mode = st.radio("동기화 방식 선택", ["📁 노션/엑셀 파일 업로드", "📋 표 복사-붙여넣기"], horizontal=True, label_visibility="collapsed")
 
-    if sync_mode == "📁 파일 업로드":
+    if sync_mode == "📁 노션/엑셀 파일 업로드":
         uploaded_file = st.file_uploader(
-            "이지어드민 파일 (.xls / .html / .htm / .csv / .xlsx)",
-            type=["xls", "html", "htm", "xlsx", "csv"]
+            "노션 내보내기 CSV / 엑셀 파일 (.csv / .xlsx / .xls)",
+            type=["csv", "xlsx", "xls", "html", "htm"]
         )
         if uploaded_file is not None:
             try:
-                df_ez = parse_easyadmin_file(uploaded_file)
-                cols = list(df_ez.columns)
+                df_f = parse_inventory_file(uploaded_file)
+                cols = list(df_f.columns)
 
-                auto_bc = next((c for c in cols if any(k in str(c) for k in ["바코드", "상품코드"]) or "barcode" in str(c).lower()), None)
-                if not auto_bc:
-                    auto_bc = next((c for c in cols if any(k in str(c) for k in ["상품명", "품목명"])), cols[0] if cols else None)
+                # 노션 CSV 컬럼 매핑 자동 탐색 (항목명/상품명, 제품 재고, 1주판매 등)
+                auto_name = next((c for c in cols if any(k in c for k in ["항목명", "상품명", "품목명"])), cols[0])
+                auto_stock = next((c for c in cols if any(k in c for k in ["제품 재고", "현재고", "가용재고", "재고"])), cols[1] if len(cols) > 1 else cols[0])
+                auto_sales = next((c for c in cols if any(k in c for k in ["1주판매", "금일판매", "판매량"])), None)
 
-                auto_stock = next((c for c in cols if any(k in str(c) for k in ["가용재고", "현재고", "정상재고", "실재고", "재고"])), cols[1] if len(cols) > 1 else None)
-                auto_sales = next((c for c in cols if any(k in str(c) for k in ["일평균", "판매량", "출고"])), None)
+                st.caption(f"✅ 파일 분석 성공! ({len(df_f)}행 감지)")
+                sel_name_col = st.selectbox("품목명 컬럼", cols, index=cols.index(auto_name) if auto_name in cols else 0, key="up_name")
+                sel_stock_col = st.selectbox("재고 수량 컬럼", cols, index=cols.index(auto_stock) if auto_stock in cols else 0, key="up_stock")
 
-                st.caption(f"✅ 파일 분석 성공! ({len(df_ez)}행 감지)")
-                sel_bc_col = st.selectbox("기준 컬럼 (바코드/상품명)", cols, index=cols.index(auto_bc) if auto_bc in cols else 0, key="up_bc")
-                sel_stock_col = st.selectbox("재고 수량 컬럼 (현재고)", cols, index=cols.index(auto_stock) if auto_stock in cols else 0, key="up_st")
-
-                if st.button("🔄 업로드 파일로 현재고 동기화", type="primary", use_container_width=True, key="up_sync_btn"):
-                    ez_map = {}
-                    for _, r in df_ez.iterrows():
-                        b_val = str(r[sel_bc_col]).strip()
-                        s_raw = str(r[sel_stock_col]).replace(",", "").strip()
-                        s_val = pd.to_numeric(s_raw, errors="coerce")
-                        d_val = None
-                        if auto_sales and auto_sales in df_ez.columns:
-                            d_raw = str(r[auto_sales]).replace(",", "").strip()
-                            d_val = pd.to_numeric(d_raw, errors="coerce")
-                        if b_val and not pd.isna(s_val):
-                            ez_map[b_val] = {
-                                "stock": int(s_val),
-                                "sales": float(d_val) if (d_val is not None and not pd.isna(d_val)) else None
-                            }
+                if st.button("🔄 파일 데이터로 현재고 동기화", type="primary", use_container_width=True, key="file_sync_btn"):
+                    import_map = {}
+                    for _, r in df_f.iterrows():
+                        name_val = str(r[sel_name_col]).strip()
+                        stock_val = safe_int(r[sel_stock_col])
+                        sales_val = safe_float(r[auto_sales]) if (auto_sales and auto_sales in df_f.columns) else None
+                        if name_val:
+                            import_map[name_val] = {"stock": stock_val, "sales": sales_val}
 
                     updated_cnt = 0
                     for item in products:
-                        bc_key = str(item.get("barcode", "")).strip()
-                        name_key = str(item.get("name", "")).strip()
-                        matched_info = ez_map.get(bc_key) or ez_map.get(name_key)
-                        if matched_info:
-                            item["stock"] = matched_info["stock"]
-                            if matched_info["sales"] is not None:
-                                item["daily_sales"] = round(matched_info["sales"], 1)
+                        iname = str(item.get("name", "")).strip()
+                        # 이름 또는 바코드로 매칭 시도
+                        matched = import_map.get(iname)
+                        if not matched:
+                            # 괄호나 공백을 제거하고 부분 일치 확인
+                            for n_key, info in import_map.items():
+                                if iname in n_key or n_key in iname:
+                                    matched = info
+                                    break
+                        if matched:
+                            item["stock"] = matched["stock"]
+                            if matched["sales"] is not None and matched["sales"] > 0:
+                                # 1주 판매량인 경우 일평균으로 환산
+                                div_days = 7 if (auto_sales and "1주" in auto_sales) else 1
+                                item["daily_sales"] = round(matched["sales"] / div_days, 1)
                             updated_cnt += 1
 
                     save_master_data(products)
                     bump_editor_version()
-                    st.success(f"총 {updated_cnt}개 품목 동기화 완료!")
+                    st.success(f"총 {updated_cnt}개 품목 현재고 동기화 완료!")
                     st.rerun()
             except Exception as e:
                 st.error(f"파일 분석 오류: {e}")
 
     else:
-        st.caption("이지어드민 표 전체를 복사(Ctrl+C)한 뒤 아래 칸에 붙여넣기(Ctrl+V) 하세요.")
+        st.caption("노션이나 이지어드민 표를 복사(Ctrl+C)한 뒤 아래 칸에 붙여넣기(Ctrl+V) 하세요.")
         pasted_text = st.text_area(
             "여기에 표 붙여넣기 (Ctrl+V)",
-            placeholder="바코드\t상품명\t가용재고\nFLCK00894\t[Mag-Link] Black\t294",
+            placeholder="항목명\t제품 재고\t1주판매\n맥링크_실버\t672\t169",
             height=120,
             key="pasted_excel_text"
         )
@@ -1069,47 +1061,32 @@ with st.sidebar:
                 df_pasted = parse_pasted_table_text(pasted_text)
                 cols = list(df_pasted.columns)
 
-                auto_bc = next((c for c in cols if any(k in str(c) for k in ["바코드", "상품코드"]) or "barcode" in str(c).lower()), None)
-                if not auto_bc:
-                    auto_bc = next((c for c in cols if any(k in str(c) for k in ["상품명", "품목명"])), cols[0] if cols else None)
-
-                auto_stock = next((c for c in cols if any(k in str(c) for k in ["가용재고", "현재고", "정상재고", "실재고", "재고"])), cols[1] if len(cols) > 1 else None)
-                auto_sales = next((c for c in cols if any(k in str(c) for k in ["일평균", "판매량", "출고"])), None)
+                auto_name = next((c for c in cols if any(k in c for k in ["항목명", "상품명", "품목명"])), cols[0])
+                auto_stock = next((c for c in cols if any(k in c for k in ["제품 재고", "현재고", "가용재고", "재고"])), cols[1] if len(cols) > 1 else cols[0])
 
                 st.caption(f"✅ 붙여넣은 표 분석 성공! ({len(df_pasted)}행 감지)")
-                sel_bc_col = st.selectbox("기준 컬럼 (바코드/상품명)", cols, index=cols.index(auto_bc) if auto_bc in cols else 0, key="paste_bc")
-                sel_stock_col = st.selectbox("재고 수량 컬럼 (현재고)", cols, index=cols.index(auto_stock) if auto_stock in cols else 0, key="paste_st")
+                sel_name_col = st.selectbox("품목명 컬럼", cols, index=cols.index(auto_name) if auto_name in cols else 0, key="paste_name")
+                sel_stock_col = st.selectbox("재고 수량 컬럼", cols, index=cols.index(auto_stock) if auto_stock in cols else 0, key="paste_stock")
 
                 if st.button("🔄 붙여넣은 표로 현재고 동기화", type="primary", use_container_width=True, key="paste_sync_btn"):
-                    ez_map = {}
+                    import_map = {}
                     for _, r in df_pasted.iterrows():
-                        b_val = str(r[sel_bc_col]).strip()
-                        s_raw = str(r[sel_stock_col]).replace(",", "").strip()
-                        s_val = pd.to_numeric(s_raw, errors="coerce")
-                        d_val = None
-                        if auto_sales and auto_sales in df_pasted.columns:
-                            d_raw = str(r[auto_sales]).replace(",", "").strip()
-                            d_val = pd.to_numeric(d_raw, errors="coerce")
-                        if b_val and not pd.isna(s_val):
-                            ez_map[b_val] = {
-                                "stock": int(s_val),
-                                "sales": float(d_val) if (d_val is not None and not pd.isna(d_val)) else None
-                            }
+                        name_val = str(r[sel_name_col]).strip()
+                        stock_val = safe_int(r[sel_stock_col])
+                        if name_val:
+                            import_map[name_val] = stock_val
 
                     updated_cnt = 0
                     for item in products:
-                        bc_key = str(item.get("barcode", "")).strip()
-                        name_key = str(item.get("name", "")).strip()
-                        matched_info = ez_map.get(bc_key) or ez_map.get(name_key)
-                        if matched_info:
-                            item["stock"] = matched_info["stock"]
-                            if matched_info["sales"] is not None:
-                                item["daily_sales"] = round(matched_info["sales"], 1)
+                        iname = str(item.get("name", "")).strip()
+                        matched_stock = import_map.get(iname)
+                        if matched_stock is not None:
+                            item["stock"] = matched_stock
                             updated_cnt += 1
 
                     save_master_data(products)
                     bump_editor_version()
-                    st.success(f"총 {updated_cnt}개 품목 동기화 완료!")
+                    st.success(f"총 {updated_cnt}개 품목 현재고 동기화 완료!")
                     st.rerun()
             except Exception as e:
                 st.error(f"붙여넣기 분석 오류: {e}")
@@ -1434,6 +1411,7 @@ with tab_master:
     df_master = pd.DataFrame(products)
 
     if is_admin:
+        edited_master = pd.DataFrame(products)
         edited_master = st.data_editor(
             df_master,
             num_rows="dynamic",
