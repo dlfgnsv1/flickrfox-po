@@ -1,92 +1,58 @@
 import streamlit as st
-import streamlit.components.v1 as components
 import pandas as pd
 import numpy as np
 import json
 import os
 import math
 import calendar
-import base64
 import requests
-from PIL import Image
 from datetime import datetime, date, timedelta
 
 # =========================================================
-# 1. 기본 환경 설정 및 크롬 바로가기/모바일 아이콘 강제 덮어쓰기
+# 1. 기본 환경 설정 및 모바일 최적화 메타 태그
 # =========================================================
-ICON_PATH = "fox.png"
-page_icon_obj = Image.open(ICON_PATH) if os.path.exists(ICON_PATH) else "🦊"
-
 st.set_page_config(
     page_title="FLICKRFOX 상품관리",
-    page_icon=page_icon_obj,
+    page_icon="fox.png",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 st.markdown("""
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="manifest" href="manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="FLICKRFOX 상품관리">
+    <meta name="application-name" content="FLICKRFOX 상품관리">
+    <meta name="theme-color" content="#14171F">
     <style>
         .block-container { padding-top: 2rem; padding-bottom: 3rem; }
-        div[data-testid="stMetricValue"] { font-size: 1.6rem !important; }
+        
+        /* 상단 KPI 카드 가독성 대폭 확대 */
+        div[data-testid="stMetric"] {
+            background-color: #1E222D;
+            border: 1px solid #2D3343;
+            padding: 18px 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.25);
+        }
+        div[data-testid="stMetricLabel"] { font-size: 1.05rem !important; font-weight: 700 !important; color: #94A3B8 !important; }
+        div[data-testid="stMetricValue"] { font-size: 2.1rem !important; font-weight: 800 !important; color: #F8FAFC !important; }
+        
+        /* 품절 경고 박스 강조 */
+        .oos-alert-box {
+            background-color: #3B181E;
+            border: 1.5px solid #EF4444;
+            padding: 14px 18px;
+            border-radius: 10px;
+            color: #FEE2E2;
+            font-weight: 600;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2);
+        }
     </style>
 """, unsafe_allow_html=True)
-
-def force_override_pwa_and_favicon(img_path, app_title="FLICKRFOX 상품관리"):
-    if not os.path.exists(img_path):
-        return
-    with open(img_path, "rb") as f:
-        b64_icon = base64.b64encode(f.read()).decode("utf-8")
-
-    # components.html은 차단되지 않고 실제로 실행되어 상위 프레임의 아이콘과 매니페스트를 교체합니다.
-    components.html(f"""
-        <script>
-            (function() {{
-                const iconUrl = "data:image/png;base64,{b64_icon}";
-                const titleText = "{app_title}";
-
-                function overrideParentMeta() {{
-                    try {{
-                        const doc = window.parent.document;
-                        if (doc.title !== titleText) doc.title = titleText;
-
-                        // 1. 기존 왕관 아이콘 태그 모두 여우 이미지로 변경
-                        doc.querySelectorAll("link[rel*='icon'], link[rel='apple-touch-icon']").forEach(el => {{
-                            el.href = iconUrl;
-                        }});
-
-                        // 2. 크롬 바로가기용 동적 Manifest 생성 및 덮어쓰기
-                        const manifestObj = {{
-                            "name": titleText,
-                            "short_name": titleText,
-                            "start_url": window.parent.location.href,
-                            "display": "standalone",
-                            "background_color": "#14171F",
-                            "theme_color": "#14171F",
-                            "icons": [
-                                {{ "src": iconUrl, "sizes": "192x192", "type": "image/png" }},
-                                {{ "src": iconUrl, "sizes": "512x512", "type": "image/png" }}
-                            ]
-                        }};
-                        const blob = new Blob([JSON.stringify(manifestObj)], {{type: 'application/json'}});
-                        const manifestURL = URL.createObjectURL(blob);
-                        let manifestLink = doc.querySelector("link[rel='manifest']");
-                        if (manifestLink) {{
-                            manifestLink.href = manifestURL;
-                        }} else {{
-                            manifestLink = doc.createElement("link");
-                            manifestLink.rel = "manifest";
-                            manifestLink.href = manifestURL;
-                            doc.head.appendChild(manifestLink);
-                        }}
-                    }} catch (e) {{}}
-                }}
-                overrideParentMeta();
-                setInterval(overrideParentMeta, 1500);
-            }})();
-        </script>
-    """, height=0, width=0)
-
-force_override_pwa_and_favicon(ICON_PATH, "FLICKRFOX 상품관리")
 
 MASTER_FILE = "master_products.json"
 HISTORY_FILE = "po_history.json"
@@ -99,7 +65,7 @@ def get_admin_password():
             return st.secrets["ADMIN_PASSWORD"]
     except Exception:
         pass
-    return os.environ.get("ADMIN_PASSWORD", "fox1989@@")
+    return os.environ.get("ADMIN_PASSWORD", "flickrfox")
 
 def get_slack_webhook_url():
     try:
@@ -344,7 +310,6 @@ def build_calendar_events(products, po_history, memo_data, sales_multiplier):
 
     _, earliest_arrival_map = get_pending_po_map(po_history)
 
-    # 1) 메모 데이터 캘린더에 병합
     for m_date, memo_text in memo_data.items():
         events_by_date.setdefault(m_date, []).append({
             "type": "운영메모",
@@ -357,7 +322,6 @@ def build_calendar_events(products, po_history, memo_data, sales_multiplier):
             "border": "#0284C7"
         })
 
-    # 2) 발주 이력 입고 예정
     for po in po_history:
         status = str(po.get("status", "발주완료"))
         if status in ["입고완료", "취소", "반품"]:
@@ -400,7 +364,6 @@ def build_calendar_events(products, po_history, memo_data, sales_multiplier):
             if is_delayed:
                 delayed_arrivals.append(item_row)
 
-    # 3) 마스터 품절/입고전품절 산출
     for item in products:
         if item.get("status", "정상") in ["단종", "운영중단"]:
             continue
@@ -588,7 +551,6 @@ def render_monthly_calendar_html(year, month, events_by_date, filter_types):
                 tooltip = f"{ev['icon']} {ev['name']} | {ev['detail']}"
                 border_col = ev.get("border", ev["color"])
 
-                # SyntaxError 방지: 백슬래시 이스케이프 없이 변수로 먼저 생성
                 if ev["type"] == "운영메모":
                     badge_label = f"{ev['icon']} {ev['detail']}"
                 else:
@@ -608,7 +570,7 @@ def render_monthly_calendar_html(year, month, events_by_date, filter_types):
 
 
 # =========================================================
-# 4. 사이드바: 권한, 연휴 버퍼, 마케팅 시뮬레이터, 엑셀 동기화
+# 4. 사이드바 설정
 # =========================================================
 products = load_master_data()
 po_history = load_po_history()
@@ -649,11 +611,11 @@ with st.sidebar:
     target_days = st.number_input("목표 재고 유지 기간 (일)", min_value=7, max_value=90, value=30, step=1)
 
     st.markdown("---")
-    st.subheader("📈 마케팅 판매량 가중치 (2번 기능)")
+    st.subheader("📈 마케팅 판매량 가중치")
     sales_multiplier = st.slider(
         "판매 속도 변동 계수",
         min_value=1.0, max_value=5.0, value=1.0, step=0.1,
-        help="광고 집행이나 프로모션으로 평소 대비 판매량이 증가할 때 배수를 높여주세요. 발주 추천 수량과 품절일이 즉시 재계산됩니다."
+        help="프로모션으로 평소 대비 판매량이 증가할 때 배수를 높여주세요."
     )
     if sales_multiplier > 1.0:
         st.warning(f"⚠️ 현재 평소 판매량의 **{sales_multiplier}배** 속도로 소진 가정 중입니다.")
@@ -708,7 +670,7 @@ with st.sidebar:
 st.title("🦊 FLICKRFOX 상품관리 (재고 · 발주 · 캘린더)")
 
 tab_calendar, tab_dashboard, tab_history, tab_master = st.tabs([
-    "📅 재고·입고 캘린더 (운영 메모 포함)",
+    "📅 재고·입고 캘린더",
     "🚀 스마트 발주 대시보드",
     "📋 발주 히스토리 · 입고관리",
     "⚙️ 품목 마스터 관리"
@@ -716,35 +678,100 @@ tab_calendar, tab_dashboard, tab_history, tab_master = st.tabs([
 
 
 # ---------------------------------------------------------
-# [TAB 1] 📅 재고·입고 캘린더
+# [TAB 1] 📅 재고·입고 캘린더 (요약 카드와 상단 배치 개편)
 # ---------------------------------------------------------
 with tab_calendar:
     events_by_date, out_of_stock_list, stockout_soon_list, upcoming_arrivals, delayed_arrivals = (
         build_calendar_events(products, po_history, memo_data, sales_multiplier)
     )
 
+    # 1. 🔍 큼직하고 시원시원한 상단 4대 요약 KPI 카드
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("🚨 현재 품절 상품", f"{len(out_of_stock_list)}개", delta="즉시 확인 필요", delta_color="inverse")
     k2.metric("🔥 품절임박 / 입고전품절", f"{len(stockout_soon_list)}개", delta="마케팅/발주 점검", delta_color="off")
     k3.metric("📦 진행중인 입고 예정", f"{len(upcoming_arrivals)}건")
     k4.metric("⚠️ 입고 지연 경과", f"{len(delayed_arrivals)}건", delta="공장 확인 요망" if delayed_arrivals else "정상", delta_color="inverse" if delayed_arrivals else "normal")
 
+    st.write("")
+
+    # 2. 🚨 가독성을 대폭 높인 품절 상품 고정 경보 박스
     if out_of_stock_list:
         oos_names = ", ".join([f"**{x['품목명']}** (입고예정: {x['다음 입고예정']})" for x in out_of_stock_list])
-        st.error(f"🚨 **현재 품절 중인 상품 안내:** {oos_names}")
+        st.markdown(f"""
+            <div class="oos-alert-box">
+                🚨 <b>[긴급] 현재 품절 중인 상품 안내:</b> {oos_names}<br>
+                <span style="font-size:0.9rem; color:#FECACA;">👉 아래 [현재 품절] 탭에서 CS 예약발송 안내 문구를 복사하여 즉시 응대하세요.</span>
+            </div>
+        """, unsafe_allow_html=True)
 
     st.divider()
 
-    with st.expander("📝 [1번 기능] 캘린더 날짜별 운영 특이사항 및 입고 지연 메모 등록하기"):
+    # 3. 📋 캘린더보다 위로 배치된 [요약 탭 및 상세 일정 조회 영역]
+    st.markdown("### 📊 실시간 재고·품절 현황 및 상세 분석")
+    st.caption("캘린더에 앞서 확인해야 할 품절 상품, 임박 품목, 전체 입고 스케줄 및 날짜별 상세 내역입니다.")
+
+    sub_t1, sub_t2, sub_t3, sub_t4 = st.tabs([
+        f"🚨 현재 품절 ({len(out_of_stock_list)})",
+        f"🔥 품절임박 · 입고전품절 ({len(stockout_soon_list)})",
+        f"📦 전체 입고 스케줄 ({len(upcoming_arrivals)})",
+        "📌 날짜별 상세 일정 & 메모"
+    ])
+
+    with sub_t1:
+        if out_of_stock_list:
+            st.markdown("##### 🚨 현재 품절 상품 리스트 및 CS 안내 문구")
+            st.dataframe(pd.DataFrame(out_of_stock_list), use_container_width=True, hide_index=True)
+        else:
+            st.success("🎉 현재 품절(재고 0)인 상품이 없습니다!")
+
+    with sub_t2:
+        if stockout_soon_list:
+            st.markdown("##### 🔥 14일 내 품절 임박 또는 입고전품절(공백) 위험 상품")
+            df_soon = pd.DataFrame(stockout_soon_list).sort_values("품절예상일")
+            st.dataframe(df_soon, use_container_width=True, hide_index=True)
+        else:
+            st.success("✨ 향후 14일 이내 위험 품목이 없습니다!")
+
+    with sub_t3:
+        if upcoming_arrivals:
+            st.markdown("##### 📦 창고 입고 대기 스케줄")
+            df_inc = pd.DataFrame(upcoming_arrivals).sort_values("입고예정일")
+            if not is_admin:
+                df_inc = df_inc.drop(columns=["매입단가", "발주총액"], errors="ignore")
+            st.dataframe(df_inc, use_container_width=True, hide_index=True)
+        else:
+            st.info("현재 대기 중인 입고 스케줄이 없습니다.")
+
+    with sub_t4:
+        st.markdown("##### 📌 특정 날짜 상세 일정 및 운영 메모 조회")
+        c_dt1, c_dt2 = st.columns([1, 2])
+        with c_dt1:
+            picked_date = st.date_input("조회할 날짜 선택", value=today, key="picked_dt_top")
+        picked_str = picked_date.strftime("%Y-%m-%d")
+        day_items = events_by_date.get(picked_str, [])
+        if day_items:
+            df_day = pd.DataFrame(day_items)[["icon", "type", "name", "detail"]]
+            df_day.columns = ["구분", "유형", "항목", "상세내용"]
+            st.dataframe(df_day, use_container_width=True, hide_index=True)
+        else:
+            st.info(f"{picked_str}에 등록된 일정이나 메모가 없습니다.")
+
+    st.divider()
+
+    # 4. 🗓️ 맨 아래에 배치된 월간 캘린더 & 메모 등록 바
+    st.markdown("### 🗓️ 월간 캘린더 및 운영 메모 보드")
+    st.caption("전체적인 입고·품절 흐름과 날짜별 특이사항을 한 달 단위로 조망합니다.")
+
+    with st.expander("📝 캘린더 날짜별 운영 특이사항 및 입고 지연 메모 등록하기"):
         c_m1, c_m2, c_m3 = st.columns([1.5, 2.5, 1])
         with c_m1:
-            memo_date_sel = st.date_input("메모 적용 날짜", value=date.today())
+            memo_date_sel = st.date_input("메모 적용 날짜", value=date.today(), key="memo_dt_cal")
         with c_m2:
-            memo_text_input = st.text_input("특이사항 입력", placeholder="예: 택배사 파업 출고 지연, 빅프로모션 광고비 증액 등")
+            memo_text_input = st.text_input("특이사항 입력", placeholder="예: 택배사 파업 출고 지연, 빅프로모션 광고비 증액 등", key="memo_txt_cal")
         with c_m3:
             st.write("")
             st.write("")
-            if st.button("메모 저장하기", type="primary", use_container_width=True):
+            if st.button("메모 저장하기", type="primary", use_container_width=True, key="memo_btn_cal"):
                 if memo_text_input.strip():
                     memo_data[memo_date_sel.strftime("%Y-%m-%d")] = memo_text_input.strip()
                     save_memo_data(memo_data)
@@ -752,20 +779,20 @@ with tab_calendar:
                     st.rerun()
 
     st.write("")
-    today = date.today()
     c1, c2, c3, c4 = st.columns([1, 1, 2.2, 2])
     with c1:
-        sel_year = st.selectbox("연도", list(range(today.year - 1, today.year + 2)), index=1)
+        sel_year = st.selectbox("연도", list(range(today.year - 1, today.year + 2)), index=1, key="sel_yr")
     with c2:
-        sel_month = st.selectbox("월", list(range(1, 13)), index=today.month - 1)
+        sel_month = st.selectbox("월", list(range(1, 13)), index=today.month - 1, key="sel_mo")
     with c3:
         filter_types = st.multiselect(
-            "표시 항목 필터",
+            "캘린더 표시 필터",
             options=["입고예정", "품절예정", "입고전품절", "운영메모"],
-            default=["입고예정", "품절예정", "입고전품절", "운영메모"]
+            default=["입고예정", "품절예정", "입고전품절", "운영메모"],
+            key="sel_filter"
         )
     with c4:
-        cal_search = st.text_input("🔍 상품명 검색", placeholder="예: Mag-Link, 폴드8...")
+        cal_search = st.text_input("🔍 캘린더 상품 검색", placeholder="예: Mag-Link, 폴드8...", key="cal_srch")
 
     filtered_events = {}
     for d_str, ev_list in events_by_date.items():
@@ -777,7 +804,7 @@ with tab_calendar:
             filtered_events[d_str] = matched
 
     st.markdown(
-        "💡 **배지 안내:** &nbsp;"
+        "💡 **배지 범례:** &nbsp;"
         "<span style='background:#172A45;color:#60A5FA;padding:4px 8px;border-radius:4px;font-weight:bold;font-size:12px;'>📦 입고예정</span> &nbsp;"
         "<span style='background:#332414;color:#FBBF24;padding:4px 8px;border-radius:4px;font-weight:bold;font-size:12px;'>⚠️ 품절예정</span> &nbsp;"
         "<span style='background:#3B181E;color:#F87171;padding:4px 8px;border-radius:4px;font-weight:bold;font-size:12px;'>🔥 입고전품절</span> &nbsp;"
@@ -787,46 +814,6 @@ with tab_calendar:
     st.write("")
 
     render_monthly_calendar_html(sel_year, sel_month, filtered_events, filter_types)
-
-    st.write("")
-    col_detail_left, col_detail_right = st.columns([1.1, 1.9])
-    with col_detail_left:
-        st.markdown("##### 📌 날짜별 상세 일정 및 메모")
-        picked_date = st.date_input("날짜 선택", value=today, key="picked_dt")
-        picked_str = picked_date.strftime("%Y-%m-%d")
-        day_items = filtered_events.get(picked_str, [])
-        if day_items:
-            df_day = pd.DataFrame(day_items)[["icon", "type", "name", "detail"]]
-            df_day.columns = ["구분", "유형", "항목", "상세내용"]
-            st.dataframe(df_day, use_container_width=True, hide_index=True)
-        else:
-            st.info(f"{picked_str}에 등록된 일정이나 메모가 없습니다.")
-
-    with col_detail_right:
-        sub_t1, sub_t2, sub_t3 = st.tabs([
-            f"🚨 현재 품절 ({len(out_of_stock_list)})",
-            f"🔥 품절임박 · 입고전품절 ({len(stockout_soon_list)})",
-            f"📦 전체 입고 스케줄 ({len(upcoming_arrivals)})"
-        ])
-        with sub_t1:
-            if out_of_stock_list:
-                st.dataframe(pd.DataFrame(out_of_stock_list), use_container_width=True, hide_index=True)
-            else:
-                st.success("현재 품절 상품이 없습니다.")
-        with sub_t2:
-            if stockout_soon_list:
-                df_soon = pd.DataFrame(stockout_soon_list).sort_values("품절예상일")
-                st.dataframe(df_soon, use_container_width=True, hide_index=True)
-            else:
-                st.success("위험 품목이 없습니다.")
-        with sub_t3:
-            if upcoming_arrivals:
-                df_inc = pd.DataFrame(upcoming_arrivals).sort_values("입고예정일")
-                if not is_admin:
-                    df_inc = df_inc.drop(columns=["매입단가", "발주총액"], errors="ignore")
-                st.dataframe(df_inc, use_container_width=True, hide_index=True)
-            else:
-                st.info("입고 대기 내역이 없습니다.")
 
 
 # ---------------------------------------------------------
@@ -883,7 +870,7 @@ with tab_dashboard:
 
             col_btn1, col_btn2 = st.columns([1, 1])
             with col_btn1:
-                if st.button("✅ 선택 품목 발주 완료 처리 (캘린더 등록 & 슬랙 알림)", type="primary", use_container_width=True):
+                if st.button("✅ 선택 품목 발주 완료 처리 (캘린더 등록 & 슬랙 알림)", type="primary", use_container_width=True, key="po_confirm_btn"):
                     now_str = datetime.now().strftime("%Y-%m-%d")
                     new_records = []
                     slack_lines = [f"🚨 *[FLICKRFOX 신규 발주 완료 알림 ({now_str})]* (마케팅 계수: {sales_multiplier}배)"]
@@ -920,7 +907,7 @@ with tab_dashboard:
                     st.rerun()
 
             with col_btn2:
-                if st.button("📣 긴급 발주 리포트만 슬랙으로 전송", use_container_width=True):
+                if st.button("📣 긴급 발주 리포트만 슬랙으로 전송", use_container_width=True, key="slack_report_btn"):
                     slack_lines = [f"📢 *[FLICKRFOX 발주 권장 브리핑 ({date.today().strftime('%Y-%m-%d')})]*"]
                     for _, row in selected_orders.iterrows():
                         slack_lines.append(
@@ -974,7 +961,7 @@ with tab_history:
                 key="history_editor"
             )
 
-            if st.button("💾 발주 히스토리 저장", type="primary"):
+            if st.button("💾 발주 히스토리 저장", type="primary", key="hist_save_btn"):
                 save_po_history(edited_hist.to_dict(orient="records"))
                 st.success("저장 완료!")
                 st.rerun()
@@ -1010,7 +997,7 @@ with tab_master:
             key="master_editor"
         )
 
-        if st.button("💾 품목 마스터 저장", type="primary"):
+        if st.button("💾 품목 마스터 저장", type="primary", key="master_save_btn"):
             save_master_data(edited_master.to_dict(orient="records"))
             st.success("마스터 정보 저장 완료!")
             st.rerun()
