@@ -100,10 +100,10 @@ def safe_float(val, default=0.0):
 
 
 # =========================================================
-# 1-2. 이지어드민 전용 만능 파일 파서 (MS Office HTML형 .xls 완벽 지원)
+# 1-2. XML 및 HTML/SpreadsheetML 지원 만능 파서
 # =========================================================
-class RobustHTMLTableParser(HTMLParser):
-    """중첩 테이블이나 긴 CSS가 포함된 이지어드민 .xls / .html 파일에서도 모든 행(tr/td)을 정확히 추출"""
+class SpreadsheetXMLParser(HTMLParser):
+    """Excel XML (SpreadsheetML) 및 HTML 테이블 구조를 모두 지원하는 범용 파서"""
     def __init__(self):
         super().__init__()
         self.rows = []
@@ -113,27 +113,25 @@ class RobustHTMLTableParser(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         t = tag.lower()
-        if t in ("style", "script", "head", "xml"):
+        if t in ("style", "script", "head", "xml", "o:documentproperties"):
             self.in_ignore = True
-        elif t == "tr":
+        elif t in ("tr", "ss:row"):
             self.curr_row = []
-        elif t in ("td", "th"):
+        elif t in ("td", "th", "ss:cell"):
             if self.curr_row is None:
                 self.curr_row = []
             self.curr_cell = []
-        elif t == "br" and self.curr_cell is not None:
-            self.curr_cell.append(" ")
 
     def handle_endtag(self, tag):
         t = tag.lower()
-        if t in ("style", "script", "head", "xml"):
+        if t in ("style", "script", "head", "xml", "o:documentproperties"):
             self.in_ignore = False
-        elif t in ("td", "th"):
+        elif t in ("td", "th", "ss:cell"):
             if self.curr_cell is not None and self.curr_row is not None:
                 cell_text = re.sub(r"\s+", " ", "".join(self.curr_cell)).strip()
                 self.curr_row.append(cell_text)
                 self.curr_cell = None
-        elif t == "tr":
+        elif t in ("tr", "ss:row"):
             if self.curr_row and any(c != "" for c in self.curr_row):
                 self.rows.append(self.curr_row)
             self.curr_row = None
@@ -146,19 +144,17 @@ class RobustHTMLTableParser(HTMLParser):
 HEADER_KEYWORDS = ["바코드", "상품코드", "상품명", "품목명", "가용재고", "현재고", "정상재고", "재고", "옵션", "공급처"]
 
 def promote_header_row(df):
-    """표 상단에 제목 행이 섞여 있을 때 바코드/상품명/재고 키워드가 가장 많이 포함된 행을 컬럼명으로 지정"""
     df = df.dropna(how="all").reset_index(drop=True)
     if df.empty:
         return df
 
-    # 현재 컬럼명이 이미 정상인지 확인
     col_str = " ".join(str(c) for c in df.columns)
     if sum(1 for k in HEADER_KEYWORDS if k in col_str) >= 2:
         return df
 
     best_idx = None
     best_score = 0
-    for idx in range(min(25, len(df))):
+    for idx in range(min(30, len(df))):
         row_vals = [str(v).strip() for v in df.iloc[idx].values]
         row_str = " ".join(row_vals)
         score = sum(1 for k in HEADER_KEYWORDS if k in row_str)
@@ -168,7 +164,6 @@ def promote_header_row(df):
 
     if best_idx is not None and best_score >= 1:
         raw_cols = [str(v).strip() for v in df.iloc[best_idx].values]
-        # 중복 컬럼명 방지
         seen = {}
         clean_cols = []
         for i, c in enumerate(raw_cols):
@@ -188,46 +183,33 @@ def promote_header_row(df):
 
 
 def parse_easyadmin_file(uploaded_file):
-    """이지어드민 .xls(실제 HTML/XML), .html, .htm, .csv, .xlsx 파일을 모두 판별하여 DataFrame으로 변환"""
     raw_bytes = uploaded_file.getvalue()
     fname = uploaded_file.name.lower()
 
-    # 파일 전체에서 HTML/XML 태그 여부 확인 (<link rel=File-List, <table, <tr, <td 등)
-    raw_lower = raw_bytes.lower()
-    is_html_like = (
-        fname.endswith((".html", ".htm"))
-        or b"<table" in raw_lower
-        or b"<tr" in raw_lower
-        or b"<td" in raw_lower
-        or b"file-list" in raw_lower
-        or b"<html" in raw_lower
-        or b"urn:schemas-microsoft-com:office:excel" in raw_lower
-    )
+    # 1) SpreadsheetML (XML형 엑셀) 또는 HTML 문서 파싱 시도
+    text = None
+    for enc in ("utf-8-sig", "utf-8", "cp949", "euc-kr"):
+        try:
+            text = raw_bytes.decode(enc)
+            break
+        except Exception:
+            continue
+    if text is None:
+        text = raw_bytes.decode("cp949", errors="ignore")
 
-    if is_html_like:
-        text = None
-        for enc in ("utf-8-sig", "utf-8", "cp949", "euc-kr"):
-            try:
-                text = raw_bytes.decode(enc)
-                break
-            except Exception:
-                continue
-        if text is None:
-            text = raw_bytes.decode("cp949", errors="ignore")
+    parser = SpreadsheetXMLParser()
+    parser.feed(text)
 
-        parser = RobustHTMLTableParser()
-        parser.feed(text)
+    if parser.rows:
+        max_cols = max(len(r) for r in parser.rows)
+        valid_rows = [r + [""] * (max_cols - len(r)) for r in parser.rows if len(r) >= 2]
+        if valid_rows:
+            df_xml = pd.DataFrame(valid_rows)
+            df_xml = promote_header_row(df_xml)
+            if len(df_xml.columns) >= 2 and len(df_xml) > 0:
+                return df_xml
 
-        if parser.rows:
-            # 가장 흔한 열 개수(또는 최대 열 개수)에 맞춰 테이블 정렬
-            max_cols = max(len(r) for r in parser.rows)
-            valid_rows = [r + [""] * (max_cols - len(r)) for r in parser.rows if len(r) >= 2]
-            if valid_rows:
-                df_html = pd.DataFrame(valid_rows)
-                df_html = promote_header_row(df_html)
-                return df_html
-
-    # 진짜 바이너리 엑셀(.xls / .xlsx) 시도
+    # 2) 표준 엑셀(.xls / .xlsx) 시도
     for eng in ("xlrd", "openpyxl"):
         try:
             uploaded_file.seek(0)
@@ -236,7 +218,7 @@ def parse_easyadmin_file(uploaded_file):
         except Exception:
             continue
 
-    # CSV 또는 탭(\t) 구분 텍스트 시도
+    # 3) CSV 또는 탭 구분 텍스트 시도
     for sep in (",", "\t"):
         for enc in ("utf-8-sig", "cp949", "euc-kr", "utf-8"):
             try:
@@ -289,7 +271,7 @@ def save_custom_webhook(new_urls):
 SLACK_WEBHOOK_URL = get_slack_webhook_url()
 
 # =========================================================
-# 2. 초기 기본 데이터 (기존 18종 + 엑셀 캡처본 품목 통합)
+# 2. 초기 기본 데이터
 # =========================================================
 DEFAULT_PRODUCTS = [
     {"name": "[Mag-Link PRO] Black", "barcode": "FLCK00894", "supplier": "Aiweile", "lead_time": 30, "moq": 1000, "unit_price": 11105, "stock": 294, "daily_sales": 44.6, "status": "정상"},
@@ -351,7 +333,7 @@ DEFAULT_HISTORY = [
 
 
 # =========================================================
-# 3. 파일(JSON) + 메모리(Session) 이중 영구 저장소 & 다중 슬랙 전송
+# 3. 영구 저장소 함수
 # =========================================================
 def normalize_date_str(val):
     if not val or pd.isna(val):
@@ -867,7 +849,7 @@ def render_monthly_calendar_html(year, month, events_by_date, filter_types):
 
 
 # =========================================================
-# 5. 사이드바 설정 (다중 슬랙 웹훅 & .html/.xls 완벽 연동)
+# 5. 사이드바 설정
 # =========================================================
 products = load_master_data()
 po_history = load_po_history()
@@ -1002,7 +984,6 @@ with st.sidebar:
             df_ez = parse_easyadmin_file(uploaded_file)
             cols = list(df_ez.columns)
 
-            # 자동 컬럼 탐색 (바코드 / 상품코드 / 상품명 순)
             auto_bc = next((c for c in cols if any(k in str(c) for k in ["바코드", "상품코드"]) or "barcode" in str(c).lower()), None)
             if not auto_bc:
                 auto_bc = next((c for c in cols if any(k in str(c) for k in ["상품명", "품목명"])), cols[0] if cols else None)
@@ -1010,7 +991,7 @@ with st.sidebar:
             auto_stock = next((c for c in cols if any(k in str(c) for k in ["가용재고", "현재고", "정상재고", "실재고", "재고"])), cols[1] if len(cols) > 1 else None)
             auto_sales = next((c for c in cols if any(k in str(c) for k in ["일평균", "판매량", "출고"])), None)
 
-            st.caption("✅ 파일 표 추출 성공! 컬럼을 확인 후 동기화를 눌러주세요.")
+            st.caption(f"✅ 파일 표 추출 성공! 컬럼을 확인 후 동기화를 눌러주세요.")
             sel_bc_col = st.selectbox("매칭 기준 컬럼 (바코드/상품코드/상품명)", cols, index=cols.index(auto_bc) if auto_bc in cols else 0)
             sel_stock_col = st.selectbox("재고 수량 컬럼 (가용재고/현재고)", cols, index=cols.index(auto_stock) if auto_stock in cols else 0)
 
@@ -1043,7 +1024,6 @@ with st.sidebar:
 
                 save_master_data(products)
                 bump_editor_version()
-                st.toast(f"✅ 총 {updated_cnt}개 품목 현재고 동기화 완료!")
                 st.success(f"총 {updated_cnt}개 품목 동기화 완료!")
                 st.rerun()
         except Exception as e:
