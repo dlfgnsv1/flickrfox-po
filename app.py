@@ -133,7 +133,7 @@ DEFAULT_PRODUCTS = [
     {"name": "[SHIFT-GO]", "barcode": "FLCK00856", "supplier": "Landscape", "lead_time": 30, "moq": 500, "unit_price": 8000, "stock": 0, "daily_sales": 0.0, "status": "정상"}
 ]
 
-# 캡처 화면 기반 복구된 초기 발주 히스토리 데이터
+# 캡처 화면 기반 초기 발주 히스토리 데이터
 DEFAULT_HISTORY = [
     {"order_id": "PO-20261013-01", "date": "2026-10-13", "name": "맥링크 미니 샘플", "barcode": "FLCK00894", "supplier": "Aiweile", "po_qty": 1, "unit_price": 50844, "total_price": 50844, "expected_arrival": "2026-11-05", "status": "발주완료", "memo": "리드타임 14일"},
     {"order_id": "PO-20261012-02", "date": "2026-10-12", "name": "매트쉴드 fold8", "barcode": "FLCK00902", "supplier": "Swist", "po_qty": 200, "unit_price": 6690, "total_price": 1338000, "expected_arrival": "2026-10-26", "status": "발주완료", "memo": "리드타임 3일"},
@@ -164,7 +164,7 @@ DEFAULT_HISTORY = [
 
 
 # =========================================================
-# 2. 데이터 입출력 함수 (영구 복구안전장치 포함)
+# 2. 데이터 입출력 함수 (예상 도착일 경과 건 자동 '입고완료' 처리 포함)
 # =========================================================
 def load_master_data():
     if os.path.exists(MASTER_FILE):
@@ -183,16 +183,32 @@ def save_master_data(data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 def load_po_history():
+    history = []
     if os.path.exists(HISTORY_FILE):
         try:
             with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if data:
-                    return data
+                history = json.load(f)
         except Exception:
-            pass
-    save_po_history(DEFAULT_HISTORY)
-    return DEFAULT_HISTORY
+            history = []
+    
+    if not history:
+        history = DEFAULT_HISTORY
+
+    # 💡 핵심 로직: 오늘 날짜 기준으로 예상 도착일이 지난 건은 자동으로 '입고완료' 처리
+    today_str = date.today().strftime("%Y-%m-%d")
+    updated = False
+    for po in history:
+        status = str(po.get("status", "발주완료"))
+        arr_date = str(po.get("expected_arrival", ""))[:10]
+        # 아직 입고완료가 아니고, 취소/반품이 아니며, 예상 도착일이 오늘보다 과거인 경우
+        if arr_date and arr_date < today_str and status not in ["입고완료", "취소", "반품"]:
+            po["status"] = "입고완료"
+            updated = True
+
+    if updated:
+        save_po_history(history)
+
+    return history
 
 def save_po_history(history):
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
@@ -213,7 +229,7 @@ def save_memo_data(memos):
 
 def send_slack_notification(webhook_url, message_text):
     if not webhook_url:
-        return False, "슬랙 웹훅 URL이 설정되지 않았습니다."
+        return False, "슬랙 Webhook URL이 설정되지 않았습니다."
     try:
         resp = requests.post(
             webhook_url,
