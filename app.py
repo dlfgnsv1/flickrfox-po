@@ -74,7 +74,6 @@ CONFIG_FILE = "local_config.json"
 
 ADMIN_PASSWORD = "fox1989@@"
 
-# 에디터 위젯 캐시 강제 초기화용 버전 키
 if "editor_ver" not in st.session_state:
     st.session_state["editor_ver"] = 0
 
@@ -98,14 +97,7 @@ def safe_float(val, default=0.0):
         return default
 
 def get_slack_webhook_url():
-    try:
-        if "SLACK_WEBHOOK_URL" in st.secrets:
-            return st.secrets["SLACK_WEBHOOK_URL"]
-    except Exception:
-        pass
-    if os.environ.get("SLACK_WEBHOOK_URL"):
-        return os.environ.get("SLACK_WEBHOOK_URL")
-
+    # 로컬 설정 파일에 저장된 다중 웹훅이 있으면 최우선 사용
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
@@ -115,13 +107,21 @@ def get_slack_webhook_url():
         except Exception:
             pass
 
+    try:
+        if "SLACK_WEBHOOK_URL" in st.secrets:
+            return st.secrets["SLACK_WEBHOOK_URL"]
+    except Exception:
+        pass
+    if os.environ.get("SLACK_WEBHOOK_URL"):
+        return os.environ.get("SLACK_WEBHOOK_URL")
+
     p_host = "https://" + "hooks." + "slack." + "com/services"
     p_t = "T0AR4" + "PPUVN1"
     p_b = "B0C97" + "39BZ18"
     p_k = "77ssi4sP" + "pna3MVDv" + "zqNyZ7La"
     return f"{p_host}/{p_t}/{p_b}/{p_k}"
 
-def save_custom_webhook(new_url):
+def save_custom_webhook(new_urls):
     cfg = {}
     if os.path.exists(CONFIG_FILE):
         try:
@@ -129,7 +129,7 @@ def save_custom_webhook(new_url):
                 cfg = json.load(f)
         except Exception:
             pass
-    cfg["slack_webhook"] = new_url.strip()
+    cfg["slack_webhook"] = new_urls.strip()
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
 
@@ -157,7 +157,6 @@ DEFAULT_PRODUCTS = [
     {"name": "[Spring strap] Black", "barcode": "FLCK00838", "supplier": "D.y", "lead_time": 14, "moq": 1000, "unit_price": 308, "stock": 302, "daily_sales": 37.4, "status": "정상"},
     {"name": "[Spider mag stand] Arctic Silver", "barcode": "FLCK00728", "supplier": "Aiweile", "lead_time": 30, "moq": 500, "unit_price": 7500, "stock": 200, "daily_sales": 0.9, "status": "정상"},
     {"name": "[SHIFT-GO]", "barcode": "FLCK00856", "supplier": "Landscape", "lead_time": 30, "moq": 500, "unit_price": 8000, "stock": 0, "daily_sales": 0.0, "status": "정상"},
-    # 엑셀 캡처본에 포함된 추가 발주 품목들
     {"name": "맥링크 맥스 블랙", "barcode": "FLCK-MAX-BLK", "supplier": "Aiweile", "lead_time": 25, "moq": 300, "unit_price": 16056, "stock": 50, "daily_sales": 5.0, "status": "정상"},
     {"name": "폴리 스트랩 60cm", "barcode": "FLCK-STR60", "supplier": "D.y", "lead_time": 14, "moq": 1500, "unit_price": 308, "stock": 200, "daily_sales": 15.0, "status": "정상"},
     {"name": "폴리 스트랩 30cm", "barcode": "FLCK-STR30", "supplier": "D.y", "lead_time": 14, "moq": 1500, "unit_price": 248, "stock": 200, "daily_sales": 15.0, "status": "정상"},
@@ -166,7 +165,6 @@ DEFAULT_PRODUCTS = [
     {"name": "맥링크 줄고리", "barcode": "FLCK-HOOK", "supplier": "Shenzhen Technology", "lead_time": 5, "moq": 5000, "unit_price": 21, "stock": 1500, "daily_sales": 50.0, "status": "정상"}
 ]
 
-# 엑셀 캡처 화면 27행 전체 완벽 복원 데이터 (2026-10-15 기준 도착일 지난 건 '입고완료' 처리됨)
 DEFAULT_HISTORY = [
     {"order_id": "PO-20261013-01", "date": "2026-10-13", "name": "맥링크 미니 샘플", "barcode": "FLCK-MINI-SMP", "supplier": "Aiweile", "po_qty": 1, "unit_price": 50844, "total_price": 50844, "expected_arrival": "2026-11-05", "status": "발주완료", "memo": "2차결제: 2026-10-27 | 리드타임 14일"},
     {"order_id": "PO-20261012-02", "date": "2026-10-12", "name": "[Matte-Shield/CW] Z Fold 8", "barcode": "FLCK00902", "supplier": "Swist", "po_qty": 200, "unit_price": 6690, "total_price": 1338000, "expected_arrival": "2026-10-26", "status": "발주완료", "memo": "매트쉴드 fold8 | 2차결제: 2026-10-15"},
@@ -200,7 +198,7 @@ DEFAULT_HISTORY = [
 
 
 # =========================================================
-# 3. 파일(JSON) + 메모리(Session) 이중 영구 저장소 함수
+# 3. 파일(JSON) + 메모리(Session) 이중 영구 저장소 & 다중 슬랙 전송
 # =========================================================
 def normalize_date_str(val):
     if not val or pd.isna(val):
@@ -291,21 +289,43 @@ def save_memo_data(memos):
     with open(MEMO_FILE, "w", encoding="utf-8") as f:
         json.dump(memos, f, ensure_ascii=False, indent=2)
 
-def send_slack_notification(webhook_url, message_text):
-    if not webhook_url:
+def send_slack_notification(webhook_urls_raw, message_text):
+    """여러 개의 슬랙 Webhook URL(줄바꿈 또는 쉼표 구분)로 동시에 메시지를 발송합니다."""
+    if not webhook_urls_raw:
         return False, "슬랙 Webhook URL이 설정되지 않았습니다."
-    try:
-        resp = requests.post(
-            webhook_url,
-            json={"text": message_text},
-            headers={"Content-Type": "application/json"},
-            timeout=10
-        )
-        if resp.status_code == 200:
-            return True, "슬랙 알림 전송 완료!"
-        return False, f"슬랙 응답 오류 (코드 {resp.status_code})"
-    except Exception as e:
-        return False, f"전송 실패: {e}"
+
+    if isinstance(webhook_urls_raw, list):
+        raw_list = webhook_urls_raw
+    else:
+        raw_list = str(webhook_urls_raw).replace(",", "\n").splitlines()
+
+    urls = [u.strip() for u in raw_list if u.strip().startswith("http")]
+    if not urls:
+        return False, "유효한 슬랙 Webhook URL이 없습니다."
+
+    success_cnt = 0
+    errors = []
+    for idx, url in enumerate(urls, 1):
+        try:
+            resp = requests.post(
+                url,
+                json={"text": message_text},
+                headers={"Content-Type": "application/json"},
+                timeout=10
+            )
+            if resp.status_code == 200:
+                success_cnt += 1
+            else:
+                errors.append(f"채널{idx} 오류({resp.status_code})")
+        except Exception as e:
+            errors.append(f"채널{idx} 실패({e})")
+
+    if success_cnt == len(urls):
+        return True, f"총 {success_cnt}개 채널 동시 전송 완료!"
+    elif success_cnt > 0:
+        return True, f"{success_cnt}/{len(urls)}개 채널 전송 완료 ({', '.join(errors)})"
+    else:
+        return False, f"슬랙 전송 실패: {', '.join(errors)}"
 
 
 # =========================================================
@@ -695,7 +715,7 @@ def render_monthly_calendar_html(year, month, events_by_date, filter_types):
 
 
 # =========================================================
-# 5. 사이드바 설정 (원클릭 복원 & 백업 덮어쓰기 완벽 작동)
+# 5. 사이드바 설정 (다중 슬랙 웹훅 입력 & 데이터 복원)
 # =========================================================
 products = load_master_data()
 po_history = load_po_history()
@@ -717,18 +737,32 @@ with st.sidebar:
     is_admin = (admin_pw_input == ADMIN_PASSWORD)
     if is_admin:
         st.success("🔓 **관리자 모드** 활성화됨")
-        with st.expander("🔔 슬랙 웹훅(Webhook) 설정"):
-            new_wh = st.text_input("새 슬랙 Webhook URL", value="", type="password", placeholder="https://hooks.slack.com/...")
-            if st.button("웹훅 URL 저장", use_container_width=True):
-                if new_wh.strip():
-                    save_custom_webhook(new_wh.strip())
-                    st.success("저장 완료!")
-                    st.rerun()
+        with st.expander("🔔 슬랙 웹훅(Webhook) 다중 채널 설정"):
+            st.caption("2개 이상의 채널로 동시에 보내려면 줄바꿈(Enter)이나 쉼표(,)로 구분해서 붙여넣으세요.")
+            new_wh = st.text_area(
+                "슬랙 Webhook URL 목록 (다중 입력 가능)",
+                value=SLACK_WEBHOOK_URL,
+                height=100,
+                placeholder="https://hooks.slack.com/services/... (제품기획)\nhttps://hooks.slack.com/services/... (방미경 PD)"
+            )
+            col_w1, col_w2 = st.columns(2)
+            with col_w1:
+                if st.button("💾 웹훅 저장", type="primary", use_container_width=True):
+                    if new_wh.strip():
+                        save_custom_webhook(new_wh.strip())
+                        st.success("슬랙 채널 저장 완료!")
+                        st.rerun()
+            with col_w2:
+                if st.button("🔔 테스트 발송", use_container_width=True):
+                    ok, msg = send_slack_notification(new_wh.strip(), "✅ *[FLICKRFOX 상품관리]* 다중 채널 연동 테스트 메시지입니다.")
+                    if ok:
+                        st.success(msg)
+                    else:
+                        st.error(msg)
                     
-        with st.expander("💾 데이터 백업 및 복구", expanded=True):
+        with st.expander("💾 데이터 백업 및 복구", expanded=False):
             st.caption("파일 업로드 없이 바로 복원하거나 JSON 백업본을 덮어쓸 수 있습니다.")
             
-            # 1) 원클릭 엑셀 캡처 원본 데이터 강제 복원 버튼
             if st.button("⚡ 엑셀 캡처 원본 데이터로 즉시 복원", type="primary", use_container_width=True):
                 restored_master = [dict(x) for x in DEFAULT_PRODUCTS]
                 restored_hist, _ = auto_mark_past_arrivals([dict(x) for x in DEFAULT_HISTORY])
@@ -759,7 +793,6 @@ with st.sidebar:
                         raw_bytes = uploaded_backup.getvalue()
                         b_data = json.loads(raw_bytes.decode("utf-8-sig"))
 
-                        # 통합 백업본({"master":..., "history":...}) 또는 단일 리스트 JSON 모두 호환
                         if isinstance(b_data, dict):
                             m_list = b_data.get("master") or b_data.get("products") or b_data.get("master_products")
                             h_list = b_data.get("history") or b_data.get("po_history") or b_data.get("orders")
@@ -818,7 +851,6 @@ with st.sidebar:
                 try:
                     df_ez = pd.read_excel(uploaded_file, engine="xlrd")
                 except Exception:
-                    # 이지어드민 .xls 파일이 HTML 테이블 형식인 경우 대비
                     uploaded_file.seek(0)
                     df_ez = pd.read_html(uploaded_file)[0]
             else:
