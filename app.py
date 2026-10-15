@@ -40,16 +40,29 @@ st.markdown("""
         div[data-testid="stMetricLabel"] { font-size: 1.05rem !important; font-weight: 700 !important; color: #94A3B8 !important; }
         div[data-testid="stMetricValue"] { font-size: 2.1rem !important; font-weight: 800 !important; color: #F8FAFC !important; }
         
-        /* 품절 경고 박스 강조 */
-        .oos-alert-box {
-            background-color: #3B181E;
+        /* 긴급 품절 카드 스타일 (상단 KPI와 통일된 카드 형태) */
+        .oos-card {
+            background-color: #1E222D;
             border: 1.5px solid #EF4444;
-            padding: 14px 18px;
-            border-radius: 10px;
-            color: #FEE2E2;
-            font-weight: 600;
+            padding: 20px 22px;
+            border-radius: 12px;
+            color: #F8FAFC;
             margin-bottom: 1.5rem;
-            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2);
+            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.25);
+        }
+        .oos-card-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: #EF4444;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .oos-card-content {
+            font-size: 0.95rem;
+            color: #E2E8F0;
+            line-height: 1.5;
         }
     </style>
 """, unsafe_allow_html=True)
@@ -681,14 +694,13 @@ tab_calendar, tab_dashboard, tab_history, tab_master = st.tabs([
 # [TAB 1] 📅 재고·입고 캘린더 (요약 최우선 배치)
 # ---------------------------------------------------------
 with tab_calendar:
-    # 날짜 선언을 탭 맨 위로 이동하여 NameError 방지
     today = date.today()
 
     events_by_date, out_of_stock_list, stockout_soon_list, upcoming_arrivals, delayed_arrivals = (
         build_calendar_events(products, po_history, memo_data, sales_multiplier)
     )
 
-    # 1. 🔍 큼직하고 시원시원한 상단 4대 요약 KPI 카드
+    # 1. 🔍 상단 4대 요약 KPI 카드
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("🚨 현재 품절 상품", f"{len(out_of_stock_list)}개", delta="즉시 확인 필요", delta_color="inverse")
     k2.metric("🔥 품절임박 / 입고전품절", f"{len(stockout_soon_list)}개", delta="마케팅/발주 점검", delta_color="off")
@@ -697,13 +709,13 @@ with tab_calendar:
 
     st.write("")
 
-    # 2. 🚨 가독성을 대폭 높인 품절 상품 고정 경보 박스
+    # 2. 🚨 카드 형태로 깔끔하게 디자인된 품절 상품 안내 영역 (불필요한 문구 삭제)
     if out_of_stock_list:
         oos_names = ", ".join([f"**{x['품목명']}** (입고예정: {x['다음 입고예정']})" for x in out_of_stock_list])
         st.markdown(f"""
-            <div class="oos-alert-box">
-                🚨 <b>[긴급] 현재 품절 중인 상품 안내:</b> {oos_names}<br>
-                <span style="font-size:0.9rem; color:#FECACA;">👉 아래 [현재 품절] 탭에서 CS 예약발송 안내 문구를 복사하여 즉시 응대하세요.</span>
+            <div class="oos-card">
+                <div class="oos-card-title">🚨 현재 품절 중인 상품 안내</div>
+                <div class="oos-card-content">{oos_names}</div>
             </div>
         """, unsafe_allow_html=True)
 
