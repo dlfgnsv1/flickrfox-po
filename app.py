@@ -103,90 +103,9 @@ def safe_float(val, default=0.0):
 
 
 # =========================================================
-# 1-2. 파일 및 표 파싱 유틸리티 (노션 CSV 스마트 매칭 지원)
+# 1-2. 노션 CSV 완벽 파싱 및 정확한 매칭 엔진
 # =========================================================
-class SpreadsheetXMLParser(HTMLParser):
-    def __init__(self):
-        super().__init__()
-        self.rows = []
-        self.curr_row = None
-        self.curr_cell = None
-        self.in_ignore = False
-
-    def handle_starttag(self, tag, attrs):
-        t = tag.lower()
-        if t in ("style", "script", "head", "xml", "o:documentproperties"):
-            self.in_ignore = True
-        elif t in ("tr", "ss:row"):
-            self.curr_row = []
-        elif t in ("td", "th", "ss:cell"):
-            if self.curr_row is None:
-                self.curr_row = []
-            self.curr_cell = []
-        elif t == "br" and self.curr_cell is not None:
-            self.curr_cell.append(" ")
-
-    def handle_endtag(self, tag):
-        t = tag.lower()
-        if t in ("style", "script", "head", "xml", "o:documentproperties"):
-            self.in_ignore = False
-        elif t in ("td", "th", "ss:cell"):
-            if self.curr_cell is not None and self.curr_row is not None:
-                cell_text = re.sub(r"\s+", " ", "".join(self.curr_cell)).strip()
-                self.curr_row.append(cell_text)
-                self.curr_cell = None
-        elif t in ("tr", "ss:row"):
-            if self.curr_row and any(c != "" for c in self.curr_row):
-                self.rows.append(self.curr_row)
-            self.curr_row = None
-
-    def handle_data(self, data):
-        if not self.in_ignore and self.curr_cell is not None:
-            self.curr_cell.append(data)
-
-
-HEADER_KEYWORDS = ["바코드", "상품코드", "상품명", "품목명", "가용재고", "현재고", "정상재고", "재고", "옵션", "공급처", "항목명", "제품 재고"]
-
-def promote_header_row(df):
-    df = df.dropna(how="all").reset_index(drop=True)
-    if df.empty:
-        return df
-
-    col_str = " ".join(str(c) for c in df.columns)
-    if sum(1 for k in HEADER_KEYWORDS if k in col_str) >= 2:
-        return df
-
-    best_idx = None
-    best_score = 0
-    for idx in range(min(30, len(df))):
-        row_vals = [str(v).strip() for v in df.iloc[idx].values]
-        row_str = " ".join(row_vals)
-        score = sum(1 for k in HEADER_KEYWORDS if k in row_str)
-        if score > best_score:
-            best_score = score
-            best_idx = idx
-
-    if best_idx is not None and best_score >= 1:
-        raw_cols = [str(v).strip() for v in df.iloc[best_idx].values]
-        seen = {}
-        clean_cols = []
-        for i, c in enumerate(raw_cols):
-            cname = c if c else f"컬럼_{i+1}"
-            if cname in seen:
-                seen[cname] += 1
-                cname = f"{cname}_{seen[cname]}"
-            else:
-                seen[cname] = 1
-            clean_cols.append(cname)
-
-        new_df = df.iloc[best_idx + 1:].copy()
-        new_df.columns = clean_cols
-        return new_df.reset_index(drop=True)
-
-    return df
-
-
-def parse_inventory_file(uploaded_file):
+def parse_inventory_csv(uploaded_file):
     raw_bytes = uploaded_file.getvalue()
     text = None
     for enc in ("utf-8-sig", "utf-8", "cp949", "euc-kr"):
@@ -202,89 +121,77 @@ def parse_inventory_file(uploaded_file):
         for enc in ("utf-8-sig", "cp949", "euc-kr", "utf-8"):
             try:
                 uploaded_file.seek(0)
-                df_csv = pd.read_csv(uploaded_file, sep=sep, encoding=enc)
-                if len(df_csv.columns) >= 2:
-                    return promote_header_row(df_csv)
+                df = pd.read_csv(uploaded_file, sep=sep, encoding=enc)
+                if "항목명" in df.columns and "제품 재고" in df.columns:
+                    return df
             except Exception:
                 continue
 
-    parser = SpreadsheetXMLParser()
-    parser.feed(text)
-    if parser.rows:
-        max_cols = max(len(r) for r in parser.rows)
-        valid_rows = [r + [""] * (max_cols - len(r)) for r in parser.rows if len(r) >= 2]
-        if valid_rows:
-            df_xml = pd.DataFrame(valid_rows)
-            return promote_header_row(df_xml)
+    # 일반 CSV 로드 실패시 재시도
+    uploaded_file.seek(0)
+    return pd.read_csv(uploaded_file, encoding="utf-8-sig")
 
-    for eng in ("xlrd", "openpyxl"):
-        try:
-            uploaded_file.seek(0)
-            df_ex = pd.read_excel(uploaded_file, engine=eng)
-            return promote_header_row(df_ex)
-        except Exception:
+
+def smart_match_and_sync(df_notion, products):
+    """노션 CSV 행 데이터를 순회하며 앱 마스터 상품과 1대1 완벽 매칭 후 재고 및 판매량 갱신"""
+    updated_count = 0
+    
+    # 노션 행 데이터를 딕셔너리로 변환
+    for _, row in df_notion.iterrows():
+        name_raw = str(row.get("항목명", "")).strip()
+        if not name_raw or name_raw == "nan":
             continue
+            
+        stock_val = safe_int(row.get("제품 재고", 0))
+        sales_1w = safe_float(row.get("1주판매", 0.0))
+        daily_sales_val = round(sales_1w / 7.0, 1) if sales_1w > 0 else 0.0
 
-    raise ValueError("파일 내부에 재고 표 데이터를 읽을 수 없습니다.")
+        n_clean = re.sub(r'[\s\[\]\-_/]+', '', name_raw).lower()
+        
+        matched_item = None
+        # 1단계: 정확한 정규화 매칭
+        for item in products:
+            m_name = str(item.get("name", ""))
+            m_clean = re.sub(r'[\s\[\]\-_/]+', '', m_name).lower()
+            if n_clean == m_clean:
+                matched_item = item
+                break
 
+        # 2단계: 키워드 및 색상 스마트 매칭 (맥링크, 턴스탠드, 매트쉴드 등)
+        if not matched_item:
+            for item in products:
+                m_name = str(item.get("name", "")).lower()
+                # 한글 노션 이름과 영문 상품명의 핵심 키워드 대조
+                if ("맥링크" in name_raw and "mag-link" in m_name) or \
+                   ("턴스탠드" in name_raw and "turnstand" in m_name) or \
+                   ("옥토락" in name_raw and "octolock" in m_name) or \
+                   ("에임맥홀더" in name_raw and "mag-holder" in m_name) or \
+                   ("매트원" in name_raw and "matte-one" in m_name) or \
+                   ("매트-쉴드" in name_raw and "matte-shield" in m_name) or \
+                   ("얼티밋" in name_raw and "ult" in m_name):
+                    
+                    # 색상 또는 옵션 일치 확인
+                    notion_lower = name_raw.lower()
+                    if ("실버" in notion_lower and "silver" in m_name) or \
+                       ("블랙" in notion_lower and "black" in m_name) or \
+                       ("그린" in notion_lower and "green" in m_name) or \
+                       ("브라운" in notion_lower and "brown" in m_name) or \
+                       ("화이트" in notion_lower and "white" in m_name) or \
+                       ("fold 8" in notion_lower and "fold 8" in m_name) or \
+                       ("fold 7" in notion_lower and "fold 7" in m_name):
+                        matched_item = item
+                        break
+                    elif not any(c in notion_lower for c in ["실버", "블랙", "그린", "브라운", "화이트", "fold"]):
+                        matched_item = item
+                        break
 
-def parse_pasted_table_text(raw_text):
-    lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
-    if not lines:
-        raise ValueError("입력된 텍스트가 없습니다.")
-    
-    parsed_rows = []
-    for line in lines:
-        parts = line.split("\t")
-        if len(parts) <= 1:
-            parts = re.split(r'\s{2,}', line)
-        parsed_rows.append([p.strip() for p in parts])
+        if matched_item:
+            matched_item["stock"] = stock_val
+            if daily_sales_val > 0:
+                matched_item["daily_sales"] = daily_sales_val
+            updated_count += 1
 
-    max_cols = max(len(r) for r in parsed_rows)
-    padded = [r + [""] * (max_cols - len(r)) for r in parsed_rows]
-    df = pd.DataFrame(padded)
-    return promote_header_row(df)
-
-
-def smart_match_product_name(notion_name, master_products):
-    """노션의 항목명(예: 맥링크_실버, 360턴스탠드_블랙)을 마스터 상품과 지능적으로 매칭"""
-    n_clean = re.sub(r'[\s\[\]\-_/]+', '', notion_name).lower()
-    
-    # 1단계: 정확히 정규화된 문자열 비교
-    for item in master_products:
-        m_name = str(item.get("name", ""))
-        m_clean = re.sub(r'[\s\[\]\-_/]+', '', m_name).lower()
-        if n_clean == m_clean:
-            return item
-
-    # 2단계: 핵심 키워드(제품군 + 색상) 매칭
-    # 색상 매핑 사전
-    color_map = {
-        '실버': ['silver', '실버'], '블랙': ['black', '블랙'], '그린': ['green', '그린'],
-        '브라운': ['brown', '브라운'], '오렌지': ['orange', '오렌지'], '화이트': ['white', '화이트']
-    }
-    
-    detected_color = None
-    for kor_col, keywords in color_map.items():
-        if kor_col in notion_name.lower() or any(k in notion_name.lower() for k in keywords):
-            detected_color = kor_col
-            break
-
-    # 제품군 키워드 추출 (맥링크, 턴스탠드, 옥토락, 매트쉴드, 매트원, 에임 등)
-    product_base = re.sub(r'[_\s\-]+.*', '', notion_name).lower()
-
-    for item in master_products:
-        m_name = str(item.get("name", "")).lower()
-        # 제품명이 포함되고, 색상이 일치하는 경우
-        base_match = any(b in m_name for b in [product_base, notion_name.lower()[:3]])
-        if base_match:
-            if detected_color:
-                if any(k in m_name for k in color_map.get(detected_color, [detected_color])):
-                    return item
-            else:
-                return item
-
-    return None
+    return updated_count
 
 
 def get_config():
@@ -1028,91 +935,28 @@ with st.sidebar:
     st.divider()
 
     # =========================================================
-    # 💡 노션 CSV 파일 스마트 업로드 및 복사 연동 패널
+    # 💡 노션 CSV 파일 업로드 및 스마트 동기화 패널
     # =========================================================
-    st.subheader("📥 재고 데이터 연동 (노션 CSV / 복사)")
-    
-    sync_mode = st.radio("동기화 방식 선택", ["📁 노션 CSV 파일 업로드", "📋 표 복사-붙여넣기"], horizontal=True, label_visibility="collapsed")
+    st.subheader("📥 노션 CSV 재고 연동")
+    uploaded_notion_csv = st.file_uploader(
+        "노션 재고 현황 CSV 파일 업로드",
+        type=["csv"],
+        key="notion_csv_uploader"
+    )
 
-    if sync_mode == "📁 노션 CSV 파일 업로드":
-        uploaded_file = st.file_uploader(
-            "노션 내보내기 CSV / 엑셀 파일 (.csv / .xlsx)",
-            type=["csv", "xlsx", "xls"]
-        )
-        if uploaded_file is not None:
-            try:
-                df_f = parse_inventory_file(uploaded_file)
-                cols = list(df_f.columns)
-
-                auto_name = next((c for c in cols if any(k in c for k in ["항목명", "상품명", "품목명"])), cols[0])
-                auto_stock = next((c for c in cols if any(k in c for k in ["제품 재고", "현재고", "가용재고", "재고"])), cols[1] if len(cols) > 1 else cols[0])
-                auto_sales = next((c for c in cols if any(k in c for k in ["1주판매", "금일판매", "판매량"])), None)
-
-                st.caption(f"✅ 파일 분석 성공! ({len(df_f)}행 감지)")
-                sel_name_col = st.selectbox("품목명 컬럼 (항목명)", cols, index=cols.index(auto_name) if auto_name in cols else 0, key="up_name")
-                sel_stock_col = st.selectbox("재고 수량 컬럼 (제품 재고)", cols, index=cols.index(auto_stock) if auto_stock in cols else 0, key="up_stock")
-
-                if st.button("🔄 노션 CSV 데이터로 현재고 동기화", type="primary", use_container_width=True, key="file_sync_btn"):
-                    updated_cnt = 0
-                    for _, r in df_f.iterrows():
-                        notion_name = str(r[sel_name_col]).strip()
-                        stock_val = safe_int(r[sel_stock_col])
-                        sales_val = safe_float(r[auto_sales]) if (auto_sales and auto_sales in df_f.columns) else None
-
-                        # 스마트 매칭 함수 호출
-                        matched_item = smart_match_product_name(notion_name, products)
-                        if matched_item:
-                            matched_item["stock"] = stock_val
-                            if sales_val is not None and sales_val > 0:
-                                div_days = 7 if (auto_sales and "1주" in auto_sales) else 1
-                                matched_item["daily_sales"] = round(sales_val / div_days, 1)
-                            updated_cnt += 1
-
-                    save_master_data(products)
-                    bump_editor_version()
-                    st.success(f"총 {updated_cnt}개 품목 현재고 및 판매량 스마트 동기화 완료!")
-                    st.rerun()
-            except Exception as e:
-                st.error(f"파일 분석 오류: {e}")
-
-    else:
-        st.caption("노션 표 전체를 마우스로 복사(Ctrl+C)한 뒤 아래 칸에 붙여넣기(Ctrl+V) 하세요.")
-        pasted_text = st.text_area(
-            "여기에 표 붙여넣기 (Ctrl+V)",
-            placeholder="항목명\t제품 재고\t1주판매\n맥링크_실버\t672\t169",
-            height=120,
-            key="pasted_excel_text"
-        )
-
-        if pasted_text.strip():
-            try:
-                df_pasted = parse_pasted_table_text(pasted_text)
-                cols = list(df_pasted.columns)
-
-                auto_name = next((c for c in cols if any(k in c for k in ["항목명", "상품명", "품목명"])), cols[0])
-                auto_stock = next((c for c in cols if any(k in c for k in ["제품 재고", "현재고", "가용재고", "재고"])), cols[1] if len(cols) > 1 else cols[0])
-
-                st.caption(f"✅ 붙여넣은 표 분석 성공! ({len(df_pasted)}행 감지)")
-                sel_name_col = st.selectbox("품목명 컬럼", cols, index=cols.index(auto_name) if auto_name in cols else 0, key="paste_name")
-                sel_stock_col = st.selectbox("재고 수량 컬럼", cols, index=cols.index(auto_stock) if auto_stock in cols else 0, key="paste_stock")
-
-                if st.button("🔄 붙여넣은 표로 현재고 동기화", type="primary", use_container_width=True, key="paste_sync_btn"):
-                    updated_cnt = 0
-                    for _, r in df_pasted.iterrows():
-                        notion_name = str(r[sel_name_col]).strip()
-                        stock_val = safe_int(r[sel_stock_col])
-
-                        matched_item = smart_match_product_name(notion_name, products)
-                        if matched_item:
-                            matched_item["stock"] = stock_val
-                            updated_cnt += 1
-
-                    save_master_data(products)
-                    bump_editor_version()
-                    st.success(f"총 {updated_cnt}개 품목 현재고 동기화 완료!")
-                    st.rerun()
-            except Exception as e:
-                st.error(f"붙여넣기 분석 오류: {e}")
+    if uploaded_notion_csv is not None:
+        try:
+            df_notion = parse_inventory_csv(uploaded_notion_csv)
+            st.caption(f"✅ 노션 CSV 파일 로드 성공! ({len(df_notion)}행 감지)")
+            
+            if st.button("🔄 노션 재고 및 판매량 즉시 동기화", type="primary", use_container_width=True, key="notion_sync_btn"):
+                synced_count = smart_match_and_sync(df_notion, products)
+                save_master_data(products)
+                bump_editor_version()
+                st.success(f"총 {synced_count}개 품목의 재고와 판매량이 노션과 정확히 일치하도록 동기화되었습니다!")
+                st.rerun()
+        except Exception as e:
+            st.error(f"노션 CSV 처리 오류: {e}")
 
 
 # =========================================================
