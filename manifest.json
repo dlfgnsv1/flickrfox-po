@@ -1,0 +1,15 @@
+{
+  "name": "FLICKRFOX 상품관리",
+  "short_name": "FLICKRFOX",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#14171F",
+  "theme_color": "#14171F",
+  "icons": [
+    {
+      "src": "fox.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
